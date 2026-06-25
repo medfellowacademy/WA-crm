@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Settings, MessageSquare, Tag, User, Palette, Building2, Zap } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
+import { WhatsAppNumbers } from '@/components/settings/whatsapp-numbers';
 import { TemplateManager } from '@/components/settings/template-manager';
 import { TagManager } from '@/components/settings/tag-manager';
 import { ProfileForm } from '@/components/settings/profile-form';
@@ -76,7 +77,7 @@ export default function SettingsPage() {
             className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
           >
             <Settings className="size-4" />
-            WhatsApp Config
+            WhatsApp
           </TabsTrigger>
           <TabsTrigger
             value="templates"
@@ -119,8 +120,12 @@ export default function SettingsPage() {
           <OrganizationPanel />
         </TabsContent>
 
-        <TabsContent value="whatsapp">
-          <WhatsAppConfig />
+        <TabsContent value="whatsapp" className="space-y-8">
+          <WhatsAppNumbers />
+          <div className="border-t border-slate-800 pt-8">
+            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Legacy Single Number Config</h3>
+            <WhatsAppConfig />
+          </div>
         </TabsContent>
 
         <TabsContent value="templates">
