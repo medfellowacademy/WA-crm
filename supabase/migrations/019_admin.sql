@@ -26,7 +26,7 @@ SELECT
   (SELECT COUNT(*) FROM contacts c WHERE c.org_id = o.id) AS contact_count,
   (SELECT COUNT(*) FROM messages msg
      JOIN conversations cv ON cv.id = msg.conversation_id
-     WHERE cv.org_id = o.id AND msg.direction = 'outbound'
+     WHERE cv.org_id = o.id AND msg.sender_type IN ('agent', 'bot')
        AND msg.created_at > now() - interval '30 days') AS messages_30d,
   (SELECT COUNT(*) FROM broadcasts b WHERE b.org_id = o.id) AS broadcast_count,
   (SELECT MAX(msg2.created_at) FROM messages msg2

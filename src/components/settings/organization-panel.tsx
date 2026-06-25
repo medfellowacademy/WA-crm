@@ -59,33 +59,22 @@ export function OrganizationPanel() {
     setLoading(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    if (!user) { setLoading(false); return }
 
     setMyId(user.id)
 
-    const { data: memberRow } = await supabase
-      .from('org_members')
-      .select('role, org_id, org:organizations(id, name, slug, plan)')
-      .eq('user_id', user.id)
-      .not('accepted_at', 'is', null)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .single()
+    // Use API route — fetches org + all members via admin client (bypasses RLS)
+    const res = await fetch('/api/org/members')
+    if (!res.ok) { setLoading(false); return }
+    const { members: allMembers, org: orgData } = await res.json()
 
-    if (!memberRow) { setLoading(false); return }
-
-    const orgData = memberRow.org as unknown as Org
     setOrg(orgData)
     setOrgName(orgData.name)
-    setMyRole(memberRow.role)
-
-    const { data: allMembers } = await supabase
-      .from('org_members')
-      .select('id, email, role, accepted_at, user_id')
-      .eq('org_id', memberRow.org_id)
-      .order('created_at', { ascending: true })
-
     setMembers(allMembers ?? [])
+
+    const me = (allMembers as Member[]).find(m => m.user_id === user.id)
+    setMyRole(me?.role ?? 'member')
+
     setLoading(false)
   }
 

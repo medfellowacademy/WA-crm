@@ -11,15 +11,6 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
 
-const DEV_MODE = process.env.NODE_ENV === 'development';
-const DEV_USER = DEV_MODE ? ({
-  id: 'dev-user-id',
-  email: 'dev@localhost',
-  app_metadata: {},
-  user_metadata: { full_name: 'Dev User' },
-  aud: 'authenticated',
-  created_at: new Date().toISOString(),
-} as unknown as User) : null;
 
 interface Profile {
   id: string;
@@ -68,14 +59,10 @@ const AuthContext = createContext<AuthContextValue | null>(null);
  * component, avoiding internal lock contention in the Supabase client.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(DEV_USER);
+  const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(!DEV_MODE);
-  // Tracked separately from `loading`. The session settles fast (one
-  // local cookie read); the profile fetch crosses the network and
-  // settles later. Callers that gate on `profile.*` need to know which
-  // window they're in — see the type doc above.
-  const [profileLoading, setProfileLoading] = useState(!DEV_MODE);
+  const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   // Shared across init, auth-state-change listener, and the exposed
   // refreshProfile() callback. Reads the current session's user id and
@@ -128,8 +115,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfileLoading(false);
       }
     }, 3000);
-
-    if (DEV_MODE) return;
 
     const init = async () => {
       try {

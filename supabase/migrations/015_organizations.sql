@@ -39,25 +39,8 @@ CREATE INDEX IF NOT EXISTS idx_organizations_slug  ON organizations(slug);
 
 ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
 
--- Members can see their own org
-DROP POLICY IF EXISTS "Org members can view org" ON organizations;
-CREATE POLICY "Org members can view org" ON organizations FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM org_members
-      WHERE org_members.org_id = organizations.id
-        AND org_members.user_id = auth.uid()
-        AND org_members.accepted_at IS NOT NULL
-    )
-  );
-
--- Only owner can update
-DROP POLICY IF EXISTS "Org owner can update" ON organizations;
-CREATE POLICY "Org owner can update" ON organizations FOR UPDATE
-  USING (owner_id = auth.uid());
-
 -- ============================================================
--- ORG_MEMBERS
+-- ORG_MEMBERS (created before organizations policies that reference it)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS org_members (
   id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -77,6 +60,27 @@ CREATE INDEX IF NOT EXISTS idx_org_members_user   ON org_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_org_members_token  ON org_members(invite_token) WHERE invite_token IS NOT NULL;
 
 ALTER TABLE org_members ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================
+-- ORGANIZATIONS POLICIES (after org_members table exists)
+-- ============================================================
+
+-- Members can see their own org
+DROP POLICY IF EXISTS "Org members can view org" ON organizations;
+CREATE POLICY "Org members can view org" ON organizations FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM org_members
+      WHERE org_members.org_id = organizations.id
+        AND org_members.user_id = auth.uid()
+        AND org_members.accepted_at IS NOT NULL
+    )
+  );
+
+-- Only owner can update
+DROP POLICY IF EXISTS "Org owner can update" ON organizations;
+CREATE POLICY "Org owner can update" ON organizations FOR UPDATE
+  USING (owner_id = auth.uid());
 
 -- Members can see who else is in their org
 DROP POLICY IF EXISTS "Org members can view members" ON org_members;

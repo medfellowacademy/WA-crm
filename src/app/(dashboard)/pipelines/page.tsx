@@ -103,9 +103,18 @@ export default function PipelinesPage() {
     const user = session?.user;
     if (!user) return null;
 
+    // Get org_id for this user (needed by RLS)
+    const { data: membership } = await supabase
+      .from('org_members')
+      .select('org_id')
+      .eq('user_id', user.id)
+      .not('accepted_at', 'is', null)
+      .limit(1)
+      .single();
+
     const { data: pipeline, error } = await supabase
       .from("pipelines")
-      .insert({ user_id: user.id, name: "Sales Pipeline" })
+      .insert({ user_id: user.id, name: "Sales Pipeline", org_id: membership?.org_id ?? null })
       .select()
       .single();
 
