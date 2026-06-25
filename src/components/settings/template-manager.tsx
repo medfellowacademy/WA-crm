@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Plus, Trash2, Loader2, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Loader2, RefreshCw, Send } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
@@ -99,6 +99,7 @@ export function TemplateManager() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [submitting, setSubmitting] = useState<string | null>(null);
   const [form, setForm] = useState<TemplateFormData>(emptyForm);
 
   useEffect(() => {
@@ -227,6 +228,29 @@ export function TemplateManager() {
     }
   }
 
+  async function handleSubmitToMeta(templateId: string) {
+    setSubmitting(templateId)
+    try {
+      const res = await fetch('/api/whatsapp/templates/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template_id: templateId }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error ?? 'Failed to submit template')
+        return
+      }
+      toast.success('Template submitted to Meta for approval! Status: Pending')
+      if (user) await fetchTemplates(user.id)
+    } catch (err) {
+      console.error('Submit error:', err)
+      toast.error('Failed to submit template to Meta')
+    } finally {
+      setSubmitting(null)
+    }
+  }
+
   async function handleDelete(id: string) {
     try {
       const { error } = await supabase
@@ -257,9 +281,9 @@ export function TemplateManager() {
         <div>
           <h2 className="text-lg font-semibold text-white">Message Templates</h2>
           <p className="text-sm text-slate-400">
-            Create and manage your WhatsApp message templates. Meta requires
-            every template to be approved in the WhatsApp Manager before it can
-            be sent — use &quot;Sync from Meta&quot; to pull your approved list.
+            Create templates here and submit them directly to Meta for approval.
+            Use <strong className="text-slate-300">Submit</strong> on any Draft to send it to Meta — approval usually takes a few minutes to 24 hours.
+            Use <strong className="text-slate-300">Sync from Meta</strong> to refresh statuses.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -322,14 +346,31 @@ export function TemplateManager() {
                     <p className="text-xs text-slate-500 italic">{template.footer_text}</p>
                   )}
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleDelete(template.id)}
-                  className="text-slate-400 hover:text-red-400 hover:bg-red-950/30 shrink-0 ml-2"
-                >
-                  <Trash2 className="size-4" />
-                </Button>
+                <div className="flex items-center gap-1 shrink-0 ml-2">
+                  {(template.status === 'Draft' || template.status === 'Rejected') && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleSubmitToMeta(template.id)}
+                      disabled={submitting === template.id}
+                      className="h-8 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                      title="Submit to Meta for approval"
+                    >
+                      {submitting === template.id
+                        ? <Loader2 className="size-3.5 animate-spin" />
+                        : <Send className="size-3.5" />}
+                      <span className="ml-1">{submitting === template.id ? 'Submitting…' : 'Submit'}</span>
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleDelete(template.id)}
+                    className="h-8 w-8 text-slate-400 hover:text-red-400 hover:bg-red-950/30"
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -342,7 +383,7 @@ export function TemplateManager() {
           <DialogHeader>
             <DialogTitle className="text-white">New Message Template</DialogTitle>
             <DialogDescription className="text-slate-400">
-              Create a new WhatsApp message template.
+              Create a template and submit it to Meta for approval. Use <code className="text-slate-300">{"{{1}}"}</code>, <code className="text-slate-300">{"{{2}}"}</code> for variables.
             </DialogDescription>
           </DialogHeader>
 
