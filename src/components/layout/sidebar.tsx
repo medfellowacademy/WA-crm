@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
@@ -19,6 +19,8 @@ import {
   LogOut,
   User,
   X,
+  Megaphone,
+  ShoppingBag,
 } from "lucide-react";
 import {
   Avatar,
@@ -50,6 +52,8 @@ const navItems: NavItem[] = [
   { href: "/contacts", label: "Contacts", icon: Users },
   { href: "/pipelines", label: "Pipelines", icon: GitBranch },
   { href: "/broadcasts", label: "Broadcasts", icon: Radio },
+  { href: "/catalog", label: "Catalog", icon: ShoppingBag },
+  { href: "/attribution", label: "Ad Attribution", icon: Megaphone },
   { href: "/automations", label: "Automations", icon: Zap },
   { href: "/flows", label: "Flows", icon: Workflow, beta: true },
 ];
@@ -69,6 +73,14 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { profile, signOut } = useAuth();
   const totalUnread = useTotalUnread();
+  const [orgBranding, setOrgBranding] = useState<{ app_name?: string | null; logo_url?: string | null } | null>(null);
+
+  useEffect(() => {
+    fetch('/api/org/members')
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.org) setOrgBranding({ app_name: d.org.app_name, logo_url: d.org.logo_url }) })
+      .catch(() => {});
+  }, []);
 
   // Close the drawer when route changes — users opened it to navigate,
   // so once they pick a destination the drawer should get out of the way.
@@ -113,12 +125,16 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
       <aside
         className={cn(
-          // Mobile: fixed drawer that slides in from the left.
-          "fixed inset-y-0 left-0 z-40 flex h-full w-64 flex-col border-r border-slate-800 bg-slate-900",
-          "transition-transform duration-200 ease-out will-change-transform",
-          open ? "translate-x-0" : "-translate-x-full",
-          // Desktop: static, always visible — reset all the mobile framing.
-          "md:static md:z-0 md:w-60 md:translate-x-0 md:transition-none",
+          // Base (desktop, md+): in-flow column, always visible.
+          "static z-0 flex h-full w-60 flex-col border-r border-slate-800 bg-slate-900",
+          // Mobile only (below md): fixed drawer that slides in from the left.
+          // Scoped with max-md: instead of overriding an unprefixed `fixed`
+          // with `md:static` — that override depends on CSS source order,
+          // which isn't guaranteed, and previously left the sidebar `fixed`
+          // (overlapping content) even at desktop widths.
+          "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-64",
+          "max-md:transition-transform max-md:duration-200 max-md:ease-out max-md:will-change-transform",
+          open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
         )}
         aria-label="Primary"
       >
@@ -126,11 +142,13 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             close button is hidden since the sidebar is always-visible. */}
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-800 px-4">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <MessageSquare className="h-4 w-4" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground overflow-hidden">
+              {orgBranding?.logo_url
+                ? <img src={orgBranding.logo_url} alt="Logo" className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                : <MessageSquare className="h-4 w-4" />}
             </div>
-            <span className="text-sm font-semibold text-white">
-              CRM Template for WhatsApp
+            <span className="text-sm font-semibold text-white truncate">
+              {orgBranding?.app_name || 'CRM Template for WhatsApp'}
             </span>
           </Link>
           <button

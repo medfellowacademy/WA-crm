@@ -7,6 +7,7 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
+import { resolveWaCredentials } from '@/lib/whatsapp/credentials'
 
 // ------------------------------------------------------------
 // Automation-side Meta sender.
@@ -21,6 +22,8 @@ import { supabaseAdmin } from './admin-client'
 
 interface SendTextArgs {
   userId: string
+  /** org_id of the conversation — used to pick the right WABA number */
+  orgId?: string | null
   conversationId: string
   contactId: string
   text: string
@@ -28,6 +31,8 @@ interface SendTextArgs {
 
 interface SendTemplateArgs {
   userId: string
+  /** org_id of the conversation — used to pick the right WABA number */
+  orgId?: string | null
   conversationId: string
   contactId: string
   templateName: string
@@ -75,21 +80,39 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('user_id', input.userId)
-    .single()
-  if (configErr || !config) {
-    throw new Error('WhatsApp not configured for this account')
-  }
+  // ── Resolve WhatsApp credentials ──────────────────────────────
+  // Use the org's WABA numbers when orgId is present; fall back to
+  // the legacy per-user whatsapp_config for older accounts.
+  let phoneNumberId: string
+  let accessToken: string
 
-  const accessToken = decrypt(config.access_token)
+  if (input.orgId) {
+    // Resolve conversation's whatsapp_number_id for the correct number
+    const { data: conv } = await db
+      .from('conversations')
+      .select('whatsapp_number_id')
+      .eq('id', input.conversationId)
+      .maybeSingle()
+    const creds = await resolveWaCredentials(db, input.orgId, conv?.whatsapp_number_id)
+    phoneNumberId = creds.phoneNumberId
+    accessToken   = creds.accessToken
+  } else {
+    const { data: config, error: configErr } = await db
+      .from('whatsapp_config')
+      .select('*')
+      .eq('user_id', input.userId)
+      .single()
+    if (configErr || !config) {
+      throw new Error('WhatsApp not configured for this account')
+    }
+    phoneNumberId = config.phone_number_id
+    accessToken   = decrypt(config.access_token)
+  }
 
   const attempt = async (phone: string): Promise<string> => {
     if (input.kind === 'template') {
       const r = await sendTemplateMessage({
-        phoneNumberId: config.phone_number_id,
+        phoneNumberId,
         accessToken,
         to: phone,
         templateName: input.templateName,
@@ -99,7 +122,7 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
       return r.messageId
     }
     const r = await sendTextMessage({
-      phoneNumberId: config.phone_number_id,
+      phoneNumberId,
       accessToken,
       to: phone,
       text: input.text,

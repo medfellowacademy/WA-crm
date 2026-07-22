@@ -13,6 +13,7 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
+import { resolveWaCredentials } from '@/lib/whatsapp/credentials'
 
 // ------------------------------------------------------------
 // Flows-side Meta sender (interactive variants).
@@ -31,6 +32,8 @@ import { supabaseAdmin } from './admin-client'
 
 interface SendTextEngineArgs {
   userId: string
+  /** org_id — used to pick the right WABA number via whatsapp_numbers */
+  orgId?: string | null
   conversationId: string
   contactId: string
   text: string
@@ -68,20 +71,32 @@ export async function engineSendText(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('user_id', args.userId)
-    .single()
-  if (configErr || !config) {
-    throw new Error('WhatsApp not configured for this account')
-  }
+  let phoneNumberId: string
+  let accessToken: string
 
-  const accessToken = decrypt(config.access_token)
+  if (args.orgId) {
+    const { data: conv } = await db
+      .from('conversations')
+      .select('whatsapp_number_id')
+      .eq('id', args.conversationId)
+      .maybeSingle()
+    const creds = await resolveWaCredentials(db, args.orgId, conv?.whatsapp_number_id)
+    phoneNumberId = creds.phoneNumberId
+    accessToken   = creds.accessToken
+  } else {
+    const { data: config, error: configErr } = await db
+      .from('whatsapp_config')
+      .select('*')
+      .eq('user_id', args.userId)
+      .single()
+    if (configErr || !config) throw new Error('WhatsApp not configured for this account')
+    phoneNumberId = config.phone_number_id
+    accessToken   = decrypt(config.access_token)
+  }
 
   const attempt = async (phone: string): Promise<string> => {
     const r = await sendTextMessage({
-      phoneNumberId: config.phone_number_id,
+      phoneNumberId,
       accessToken,
       to: phone,
       text: args.text,
@@ -137,6 +152,8 @@ export async function engineSendText(
 
 interface SendInteractiveButtonsEngineArgs {
   userId: string
+  /** org_id — used to pick the right WABA number */
+  orgId?: string | null
   conversationId: string
   contactId: string
   bodyText: string
@@ -147,6 +164,8 @@ interface SendInteractiveButtonsEngineArgs {
 
 interface SendInteractiveListEngineArgs {
   userId: string
+  /** org_id — used to pick the right WABA number */
+  orgId?: string | null
   conversationId: string
   contactId: string
   bodyText: string
@@ -212,21 +231,33 @@ async function sendInteractiveViaMeta(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('user_id', input.userId)
-    .single()
-  if (configErr || !config) {
-    throw new Error('WhatsApp not configured for this account')
-  }
+  let phoneNumberId: string
+  let accessToken: string
 
-  const accessToken = decrypt(config.access_token)
+  if (input.orgId) {
+    const { data: conv } = await db
+      .from('conversations')
+      .select('whatsapp_number_id')
+      .eq('id', input.conversationId)
+      .maybeSingle()
+    const creds = await resolveWaCredentials(db, input.orgId, conv?.whatsapp_number_id)
+    phoneNumberId = creds.phoneNumberId
+    accessToken   = creds.accessToken
+  } else {
+    const { data: config, error: configErr } = await db
+      .from('whatsapp_config')
+      .select('*')
+      .eq('user_id', input.userId)
+      .single()
+    if (configErr || !config) throw new Error('WhatsApp not configured for this account')
+    phoneNumberId = config.phone_number_id
+    accessToken   = decrypt(config.access_token)
+  }
 
   const attempt = async (phone: string): Promise<string> => {
     if (input.kind === 'buttons') {
       const r = await sendInteractiveButtons({
-        phoneNumberId: config.phone_number_id,
+        phoneNumberId,
         accessToken,
         to: phone,
         bodyText: input.bodyText,
@@ -237,7 +268,7 @@ async function sendInteractiveViaMeta(
       return r.messageId
     }
     const r = await sendInteractiveList({
-      phoneNumberId: config.phone_number_id,
+      phoneNumberId,
       accessToken,
       to: phone,
       bodyText: input.bodyText,

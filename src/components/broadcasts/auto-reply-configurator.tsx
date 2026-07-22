@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/select';
 import { MessageCircle, Loader2, ArrowLeft, ArrowRight } from 'lucide-react';
 
-interface AutoReplyConfig {
+export interface AutoReplyConfig {
   enabled: boolean;
   type: 'template' | 'text';
   templateName?: string;
@@ -211,7 +211,7 @@ export function AutoReplyConfigurator({
                           const selected = templates.find((t) => t.name === templateName);
                           onConfigChange({
                             ...config,
-                            templateName,
+                            templateName: templateName ?? undefined,
                             templateLanguage: selected?.language ?? 'en_US',
                           });
                         }}

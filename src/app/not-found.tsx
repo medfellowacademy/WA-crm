@@ -9,8 +9,11 @@ export default function NotFound() {
       <p className="text-slate-400 mb-8">
         The page you&apos;re looking for doesn&apos;t exist or has been moved.
       </p>
-      <Button asChild className="bg-primary text-primary-foreground hover:bg-primary/90">
-        <Link href="/dashboard">Go to dashboard</Link>
+      <Button
+        render={<Link href="/dashboard" />}
+        className="bg-primary text-primary-foreground hover:bg-primary/90"
+      >
+        Go to dashboard
       </Button>
     </div>
   )

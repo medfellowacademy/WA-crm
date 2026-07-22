@@ -36,7 +36,10 @@ export async function POST(request: Request) {
     let display_phone = ''
     let verified_name = ''
     try {
-      const info = await verifyPhoneNumber(phone_number_id.trim(), access_token.trim())
+      const info = await verifyPhoneNumber({
+        phoneNumberId: phone_number_id.trim(),
+        accessToken: access_token.trim(),
+      })
       display_phone = info.display_phone_number ?? ''
       verified_name = info.verified_name ?? ''
     } catch (err) {

@@ -40,15 +40,25 @@ import {
   Users,
   ChevronLeft,
   ChevronRight,
+  X,
 } from 'lucide-react';
 import { ContactForm } from '@/components/contacts/contact-form';
+import { ModuleHelpBanner } from '@/components/ui/module-help-banner';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { ContactDetailView } from '@/components/contacts/contact-detail-view';
 import { ImportModal } from '@/components/contacts/import-modal';
+import { SegmentsPanel } from '@/components/contacts/segments-panel';
 
 const PAGE_SIZE = 25;
 
 interface ContactWithTags extends Contact {
   tags?: Tag[];
+}
+
+interface SegmentRef {
+  id: string;
+  name: string;
+  contact_count: number;
 }
 
 export default function ContactsPage() {
@@ -59,6 +69,11 @@ export default function ContactsPage() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+
+  // Segment filter
+  const [selectedSegment, setSelectedSegment] = useState<SegmentRef | null>(null);
+  const [segmentContactIds, setSegmentContactIds] = useState<string[] | null>(null);
+  const [segmentLoading, setSegmentLoading] = useState(false);
 
   // Modals
   const [formOpen, setFormOpen] = useState(false);
@@ -86,6 +101,14 @@ export default function ContactsPage() {
   const fetchContacts = useCallback(async () => {
     setLoading(true);
 
+    // Short-circuit: segment with 0 contacts
+    if (segmentContactIds !== null && segmentContactIds.length === 0) {
+      setContacts([]);
+      setTotalCount(0);
+      setLoading(false);
+      return;
+    }
+
     const from = page * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
@@ -95,7 +118,10 @@ export default function ContactsPage() {
       .order('created_at', { ascending: false })
       .range(from, to);
 
-    if (search.trim()) {
+    if (segmentContactIds !== null) {
+      // Segment filter takes priority over search
+      query = query.in('id', segmentContactIds);
+    } else if (search.trim()) {
       const term = `%${search.trim()}%`;
       query = query.or(`name.ilike.${term},phone.ilike.${term},email.ilike.${term}`);
     }
@@ -138,7 +164,7 @@ export default function ContactsPage() {
 
     setContacts(enriched);
     setLoading(false);
-  }, [supabase, page, search, tagsMap]);
+  }, [supabase, page, search, tagsMap, segmentContactIds]);
 
   // Load-once-on-mount-ish data fetches. Each setter inside runs
   // inside an async promise completion (Supabase await), not
@@ -153,6 +179,34 @@ export default function ContactsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchContacts();
   }, [fetchContacts]);
+
+  async function handleSelectSegment(seg: SegmentRef) {
+    if (selectedSegment?.id === seg.id) {
+      setSelectedSegment(null);
+      setSegmentContactIds(null);
+      setPage(0);
+      return;
+    }
+    setSelectedSegment(seg);
+    setSegmentLoading(true);
+    setPage(0);
+    try {
+      const res = await fetch(`/api/segments/${seg.id}`);
+      const d = await res.json();
+      setSegmentContactIds(d.contact_ids ?? []);
+    } catch {
+      toast.error('Failed to load segment contacts');
+      setSegmentContactIds([]);
+    } finally {
+      setSegmentLoading(false);
+    }
+  }
+
+  function clearSegment() {
+    setSelectedSegment(null);
+    setSegmentContactIds(null);
+    setPage(0);
+  }
 
   function openAddForm() {
     setEditContact(null);
@@ -206,11 +260,34 @@ export default function ContactsPage() {
   const hasPrev = page > 0;
 
   return (
-    <div className="space-y-6">
+    <div className="flex gap-6">
+      {/* Left sidebar: Contact Segments */}
+      <div className="w-52 shrink-0">
+        <SegmentsPanel
+          onSelectSegment={handleSelectSegment}
+          selectedSegmentId={selectedSegment?.id}
+        />
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 min-w-0 space-y-6">
+      <ModuleHelpBanner storageKey="wacrm_help_contacts" title="Getting started with Contacts">
+        <p>Contacts are the people you message on WhatsApp. New contacts are created automatically when someone messages you — or you can import them in bulk.</p>
+        <p className="mt-1"><span className="font-medium text-slate-300">To broadcast:</span> you need contacts first. Import a CSV with Name and Phone columns (include country code, e.g. +1 for US).</p>
+        <p className="mt-1"><span className="font-medium text-slate-300">Segments</span> on the left let you group contacts by tag or filter for targeted broadcasts.</p>
+      </ModuleHelpBanner>
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">Contacts</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-white">Contacts</h1>
+            <HelpTooltip side="bottom">
+              <p>Contacts are created automatically when someone WhatsApps you, or you can add/import them manually.</p>
+              <p className="mt-1.5"><span className="font-medium text-white">Phone format:</span> always include the country code (e.g. +447911123456 for UK, +12025551234 for US). No spaces or dashes.</p>
+              <p className="mt-1.5">Tags let you segment your audience for targeted broadcasts — add tags from the contact detail view.</p>
+            </HelpTooltip>
+          </div>
           <p className="text-sm text-slate-400 mt-1">
             Manage your contact list. {totalCount > 0 && `${totalCount} total contacts.`}
           </p>
@@ -234,21 +311,39 @@ export default function ContactsPage() {
         </div>
       </div>
 
-      {/* Search */}
+      {/* Active segment banner */}
+      {selectedSegment && (
+        <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
+          <Users className="size-4 text-primary shrink-0" />
+          <span className="text-sm text-primary font-medium">
+            Segment: {selectedSegment.name}
+          </span>
+          {segmentLoading && <Loader2 className="size-3.5 animate-spin text-primary ml-1" />}
+          <button
+            onClick={clearSegment}
+            className="ml-auto text-slate-400 hover:text-white"
+            title="Clear segment filter"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Search — hidden when segment filter is active */}
+      {!selectedSegment && (
       <div className="relative max-w-sm">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-500" />
         <Input
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
-            // Reset pagination when the query changes — the result
-            // set shrinks/grows, page N may no longer be valid.
             setPage(0);
           }}
           placeholder="Search by name, phone, or email..."
           className="pl-8 bg-slate-900 border-slate-700 text-white placeholder:text-slate-500"
         />
       </div>
+      )}
 
       {/* Table */}
       <div className="rounded-lg border border-slate-800 overflow-hidden">
@@ -280,18 +375,38 @@ export default function ContactsPage() {
                   <div className="flex flex-col items-center gap-2">
                     <Users className="size-8 text-slate-600" />
                     <p className="text-sm text-slate-500">
-                      {search ? 'No contacts match your search.' : 'No contacts yet.'}
+                      {selectedSegment
+                        ? `No contacts in segment "${selectedSegment.name}".`
+                        : search
+                        ? 'No contacts match your search.'
+                        : 'No contacts yet.'}
                     </p>
-                    {!search && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={openAddForm}
-                        className="mt-2 border-slate-700 text-slate-300 hover:bg-slate-800"
-                      >
-                        <Plus className="size-3.5" />
-                        Add your first contact
-                      </Button>
+                    {!search && !selectedSegment && (
+                      <div className="mt-4 flex flex-col items-center gap-2">
+                        <p className="text-xs text-slate-500 max-w-xs">
+                          Add contacts manually or import a CSV. Contacts are also created automatically when someone WhatsApps your number.
+                        </p>
+                        <div className="flex gap-2 mt-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setImportOpen(true)}
+                            className="border-slate-700 text-slate-300 hover:bg-slate-800"
+                          >
+                            <Upload className="size-3.5" />
+                            Import CSV
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={openAddForm}
+                            className="border-slate-700 text-slate-300 hover:bg-slate-800"
+                          >
+                            <Plus className="size-3.5" />
+                            Add contact
+                          </Button>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </TableCell>
@@ -488,6 +603,7 @@ export default function ContactsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </div>{/* end main content */}
     </div>
   );
 }

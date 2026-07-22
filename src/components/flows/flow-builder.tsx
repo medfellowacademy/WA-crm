@@ -40,8 +40,14 @@ import {
   Inbox,
   GitFork,
   Tag,
+  Eye,
+  EyeOff,
+  GripVertical,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import { toast } from "sonner";
+import { FlowCanvas } from "./flow-canvas";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,6 +99,8 @@ interface BuilderNode {
   node_key: string;
   node_type: NodeType;
   config: Record<string, unknown>;
+  position_x?: number;
+  position_y?: number;
 }
 
 interface BuilderState {
@@ -343,6 +351,8 @@ export function FlowBuilder({ initialFlow, initialNodes }: FlowBuilderProps) {
       node_key: n.node_key,
       node_type: n.node_type as NodeType,
       config: n.config as Record<string, unknown>,
+      position_x: n.position_x,
+      position_y: n.position_y,
     })),
   }));
 
@@ -351,6 +361,7 @@ export function FlowBuilder({ initialFlow, initialNodes }: FlowBuilderProps) {
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(initialNodes.map((n) => n.node_key)),
   );
+
   // Tracks whether the in-memory state has user edits that haven't been
   // PUT yet. We use a wrapper setState (`setStateDirty`) for user edits;
   // status-only changes after the activate API succeeds use raw setState
@@ -360,6 +371,57 @@ export function FlowBuilder({ initialFlow, initialNodes }: FlowBuilderProps) {
     setDirty(true);
     setState(updaterOrValue);
   }, []);
+
+  // ---- Drag-and-drop node reorder ----
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+
+  const handleDragStart = useCallback((key: string) => {
+    setDragKey(key);
+  }, []);
+
+  const handleDragOver = useCallback((key: string, e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverKey(key);
+  }, []);
+
+  const handleDrop = useCallback((targetKey: string) => {
+    setDragKey(null);
+    setDragOverKey(null);
+    if (!dragKey || dragKey === targetKey) return;
+    setStateDirty((s) => {
+      const nodes = [...s.nodes];
+      const from = nodes.findIndex((n) => n.node_key === dragKey);
+      const to   = nodes.findIndex((n) => n.node_key === targetKey);
+      if (from === -1 || to === -1) return s;
+      const [moved] = nodes.splice(from, 1);
+      nodes.splice(to, 0, moved);
+      return { ...s, nodes };
+    });
+  }, [dragKey, setStateDirty]);
+
+  const handleDragEnd = useCallback(() => {
+    setDragKey(null);
+    setDragOverKey(null);
+  }, []);
+
+  // ---- Live preview toggle ----
+  const [showPreview, setShowPreview] = useState(false);
+
+  // ---- List / canvas view toggle ----
+  const [viewMode, setViewMode] = useState<"list" | "canvas">("list");
+
+  const updateNodePosition = useCallback(
+    (key: string, x: number, y: number) => {
+      setStateDirty((s) => ({
+        ...s,
+        nodes: s.nodes.map((n) =>
+          n.node_key === key ? { ...n, position_x: x, position_y: y } : n,
+        ),
+      }));
+    },
+    [setStateDirty],
+  );
 
   // Used by jumpToNode() to scroll the target into view + flash its border.
   const nodeRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -585,6 +647,26 @@ export function FlowBuilder({ initialFlow, initialNodes }: FlowBuilderProps) {
     }, 1600);
   }, []);
 
+  // Canvas nodes are click-to-edit: switch back to the list view (where
+  // the config forms live), expand the node, and scroll it into place.
+  const handleCanvasNodeClick = useCallback(
+    (key: string) => {
+      setViewMode("list");
+      requestAnimationFrame(() => jumpToNode(key));
+    },
+    [jumpToNode],
+  );
+
+  const errorNodeKeys = useMemo(
+    () =>
+      new Set(
+        issues
+          .filter((i) => i.scope === "node" && i.severity === "error" && i.node_key)
+          .map((i) => i.node_key as string),
+      ),
+    [issues],
+  );
+
   const setNodeRef = useCallback(
     (key: string) => (el: HTMLDivElement | null) => {
       if (el) nodeRefs.current.set(key, el);
@@ -595,76 +677,138 @@ export function FlowBuilder({ initialFlow, initialNodes }: FlowBuilderProps) {
 
   // ---- Render ----
   return (
-    <div className="mx-auto flex h-full max-w-4xl flex-col gap-6 p-6">
-      <Header
-        state={state}
-        setState={setStateDirty}
-        dirty={dirty}
-        saving={saving}
-        activating={activating}
-        onSave={handleSave}
-        onStatus={handleStatus}
-        onDelete={handleDelete}
-        canActivate={canActivate}
-        onBack={() => router.push("/flows")}
-        onViewRuns={() => router.push(`/flows/${initialFlow.id}/runs`)}
-      />
+    <div className={cn("flex h-full gap-0", showPreview ? "max-w-[1400px] mx-auto" : "")}>
+      {/* Editor column */}
+      <div className={cn("flex flex-col gap-6 p-6 overflow-y-auto", showPreview ? "flex-1 min-w-0" : "mx-auto w-full max-w-4xl")}>
+        <Header
+          state={state}
+          setState={setStateDirty}
+          dirty={dirty}
+          saving={saving}
+          activating={activating}
+          onSave={handleSave}
+          onStatus={handleStatus}
+          onDelete={handleDelete}
+          canActivate={canActivate}
+          onBack={() => router.push("/flows")}
+          onViewRuns={() => router.push(`/flows/${initialFlow.id}/runs`)}
+          showPreview={showPreview}
+          onTogglePreview={() => setShowPreview((v) => !v)}
+        />
 
-      <TriggerPanel
-        state={state}
-        setState={setStateDirty}
-        triggerIssues={issues.filter((i) => i.scope === "trigger")}
-      />
+        <TriggerPanel
+          state={state}
+          setState={setStateDirty}
+          triggerIssues={issues.filter((i) => i.scope === "trigger")}
+        />
 
-      <EntryPicker state={state} setState={setStateDirty} />
+        <EntryPicker state={state} setState={setStateDirty} />
 
-      <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-white">
-            Nodes ({state.nodes.length})
-          </h2>
-          <AddNodeButton onAdd={addNode} />
-        </div>
-
-        {state.nodes.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-700 bg-slate-900/50 p-8 text-center text-sm text-slate-400">
-            Add a <strong>Start</strong> node, then a <strong>Send buttons</strong>
-            {" "}node, then a <strong>Handoff</strong> — that&apos;s the welcome-menu
-            shape from the brief.
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-white">
+              Nodes ({state.nodes.length})
+            </h2>
+            <div className="flex items-center gap-2">
+              <div className="flex rounded-md border border-slate-700 bg-slate-900 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("list")}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors",
+                    viewMode === "list" ? "bg-slate-800 text-white" : "text-slate-400 hover:text-slate-200",
+                  )}
+                  title="List view"
+                >
+                  <List className="h-3.5 w-3.5" />
+                  List
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("canvas")}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors",
+                    viewMode === "canvas" ? "bg-slate-800 text-white" : "text-slate-400 hover:text-slate-200",
+                  )}
+                  title="Canvas view"
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                  Canvas
+                </button>
+              </div>
+              <AddNodeButton onAdd={addNode} />
+            </div>
           </div>
-        ) : (
-          state.nodes.map((node) => (
-            <NodeCard
-              key={node.node_key}
-              node={node}
-              allNodes={state.nodes}
-              expanded={expanded.has(node.node_key)}
-              isEntry={state.entry_node_id === node.node_key}
-              isFlashed={flashedKey === node.node_key}
-              cardRef={setNodeRef(node.node_key)}
-              issues={issues.filter(
-                (i) => i.scope === "node" && i.node_key === node.node_key,
-              )}
-              onToggle={() => toggleExpanded(node.node_key)}
-              onUpdate={(patch) => updateNode(node.node_key, patch)}
-              onUpdateConfig={(patch) => updateNodeConfig(node.node_key, patch)}
-              onRemove={() => removeNode(node.node_key)}
-              onSetEntry={() =>
-                setStateDirty((s) => ({ ...s, entry_node_id: node.node_key }))
-              }
-            />
-          ))
-        )}
-      </section>
 
-      {/* Sticky-bottom so the activate-readiness status follows the
-          user as they scroll through nodes. The parent <main> in the
-          dashboard shell is the scroll container; this stays pinned
-          to the viewport bottom (with a 1rem gap) until the page
-          naturally ends, at which point it falls back into flow. */}
-      <div className="sticky bottom-4 z-10 shadow-xl shadow-slate-950/60">
-        <ValidationPanel issues={issues} onJump={jumpToNode} />
+          {viewMode === "canvas" && state.nodes.length > 0 && (
+            <div className="h-[600px] rounded-lg border border-slate-800 bg-slate-950">
+              <FlowCanvas
+                nodes={state.nodes}
+                entryNodeId={state.entry_node_id}
+                errorKeys={errorNodeKeys}
+                onNodeClick={handleCanvasNodeClick}
+                onPositionChange={updateNodePosition}
+              />
+            </div>
+          )}
+
+          {viewMode === "list" && state.nodes.length === 0 && (
+            <div className="rounded-lg border border-dashed border-slate-700 bg-slate-900/50 p-8 text-center text-sm text-slate-400">
+              Add a <strong>Start</strong> node, then a <strong>Send buttons</strong>
+              {" "}node, then a <strong>Handoff</strong> — that&apos;s the welcome-menu
+              shape from the brief.
+            </div>
+          )}
+          {viewMode === "list" && state.nodes.length > 0 && (
+            state.nodes.map((node) => (
+              <div
+                key={node.node_key}
+                draggable
+                onDragStart={() => handleDragStart(node.node_key)}
+                onDragOver={(e) => handleDragOver(node.node_key, e)}
+                onDrop={() => handleDrop(node.node_key)}
+                onDragEnd={handleDragEnd}
+                className={cn(
+                  "transition-opacity",
+                  dragKey === node.node_key && "opacity-40",
+                  dragOverKey === node.node_key && dragKey !== node.node_key && "ring-2 ring-primary/50 rounded-xl",
+                )}
+              >
+                <NodeCard
+                  node={node}
+                  allNodes={state.nodes}
+                  expanded={expanded.has(node.node_key)}
+                  isEntry={state.entry_node_id === node.node_key}
+                  isFlashed={flashedKey === node.node_key}
+                  cardRef={setNodeRef(node.node_key)}
+                  issues={issues.filter(
+                    (i) => i.scope === "node" && i.node_key === node.node_key,
+                  )}
+                  onToggle={() => toggleExpanded(node.node_key)}
+                  onUpdate={(patch) => updateNode(node.node_key, patch)}
+                  onUpdateConfig={(patch) => updateNodeConfig(node.node_key, patch)}
+                  onRemove={() => removeNode(node.node_key)}
+                  onSetEntry={() =>
+                    setStateDirty((s) => ({ ...s, entry_node_id: node.node_key }))
+                  }
+                />
+              </div>
+            ))
+          )}
+        </section>
+
+        {/* Sticky-bottom validation panel */}
+        <div className="sticky bottom-4 z-10 shadow-xl shadow-slate-950/60">
+          <ValidationPanel issues={issues} onJump={jumpToNode} />
+        </div>
       </div>
+
+      {/* Live preview column */}
+      {showPreview && (
+        <div className="w-80 shrink-0 border-l border-slate-800 bg-slate-950 overflow-y-auto">
+          <FlowPreview state={state} />
+        </div>
+      )}
     </div>
   );
 }
@@ -685,6 +829,8 @@ function Header({
   canActivate,
   onBack,
   onViewRuns,
+  showPreview,
+  onTogglePreview,
 }: {
   state: BuilderState;
   setState: React.Dispatch<React.SetStateAction<BuilderState>>;
@@ -697,6 +843,8 @@ function Header({
   canActivate: boolean;
   onBack: () => void;
   onViewRuns: () => void;
+  showPreview: boolean;
+  onTogglePreview: () => void;
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -734,6 +882,16 @@ function Header({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onTogglePreview}
+            title={showPreview ? "Hide preview" : "Preview conversation"}
+            className={showPreview ? "text-primary" : ""}
+          >
+            {showPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            Preview
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -2135,6 +2293,154 @@ function IssueLine({
       )}
     >
       {body}
+    </div>
+  );
+}
+
+// ============================================================
+// FlowPreview — live conversation simulation panel
+// ============================================================
+
+interface PreviewMessage {
+  role: 'bot' | 'user';
+  text: string;
+  buttons?: string[];
+}
+
+function FlowPreview({ state }: { state: BuilderState }) {
+  const nodeMap = useMemo(() => {
+    const m = new Map<string, BuilderNode>();
+    for (const n of state.nodes) m.set(n.node_key, n);
+    return m;
+  }, [state.nodes]);
+
+  const preview = useMemo<PreviewMessage[]>(() => {
+    const msgs: PreviewMessage[] = [];
+    const entryKey = state.entry_node_id ?? state.nodes[0]?.node_key;
+    if (!entryKey) return msgs;
+
+    const visited = new Set<string>();
+    let currentKey: string | null = entryKey;
+    let steps = 0;
+    const MAX_STEPS = 20;
+
+    while (currentKey && steps < MAX_STEPS) {
+      if (visited.has(currentKey)) break;
+      visited.add(currentKey);
+      steps++;
+      const node = nodeMap.get(currentKey);
+      if (!node) break;
+
+      const cfg = node.config as Record<string, unknown>;
+
+      if (node.node_type === 'send_message') {
+        const text = typeof cfg.text === 'string' ? cfg.text : '';
+        if (text) msgs.push({ role: 'bot', text });
+        currentKey = typeof cfg.next_node_key === 'string' ? cfg.next_node_key : null;
+      } else if (node.node_type === 'send_buttons') {
+        const text = typeof cfg.text === 'string' ? cfg.text : '';
+        const buttons = Array.isArray(cfg.buttons)
+          ? (cfg.buttons as Array<Record<string, unknown>>)
+              .map((b) => (typeof b.title === 'string' ? b.title : ''))
+              .filter(Boolean)
+          : [];
+        msgs.push({ role: 'bot', text: text || '(choose an option)', buttons });
+        // Stop at interactive step so user can see the branch point
+        break;
+      } else if (node.node_type === 'send_list') {
+        const text = typeof cfg.text === 'string' ? cfg.text : '';
+        const sections = Array.isArray(cfg.sections)
+          ? (cfg.sections as Array<Record<string, unknown>>)
+          : [];
+        const items = sections.flatMap((s) =>
+          Array.isArray(s.rows)
+            ? (s.rows as Array<Record<string, unknown>>).map((r) =>
+                typeof r.title === 'string' ? r.title : '',
+              )
+            : [],
+        ).filter(Boolean);
+        msgs.push({ role: 'bot', text: text || '(choose from list)', buttons: items.slice(0, 5) });
+        break;
+      } else if (node.node_type === 'handoff') {
+        msgs.push({ role: 'bot', text: '🙋 Connecting you to an agent…' });
+        break;
+      } else if (node.node_type === 'end') {
+        msgs.push({ role: 'bot', text: '(Flow ends here)' });
+        break;
+      } else if (node.node_type === 'collect_input') {
+        const prompt = typeof cfg.prompt_text === 'string' ? cfg.prompt_text : 'Please type your answer:';
+        msgs.push({ role: 'bot', text: prompt });
+        const varKey = typeof cfg.var_key === 'string' ? cfg.var_key : 'answer';
+        msgs.push({ role: 'user', text: `(user types their ${varKey})` });
+        currentKey = typeof cfg.next_node_key === 'string' ? cfg.next_node_key : null;
+      } else {
+        // start, condition, set_tag — advance to next
+        currentKey = typeof cfg.next_node_key === 'string' ? cfg.next_node_key : null;
+        if (!currentKey && node.node_type === 'condition') {
+          currentKey = typeof cfg.true_node_key === 'string' ? cfg.true_node_key : null;
+        }
+      }
+    }
+    return msgs;
+  }, [state.nodes, state.entry_node_id, nodeMap]);
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+        <div>
+          <p className="text-xs font-semibold text-white">Live Preview</p>
+          <p className="text-[10px] text-slate-500">Simulates the first branch of this flow</p>
+        </div>
+      </div>
+
+      {/* Phone frame */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {preview.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-32 text-center">
+            <MessageCircle className="h-8 w-8 text-slate-700 mb-2" />
+            <p className="text-xs text-slate-500">Add nodes to see a preview</p>
+          </div>
+        ) : (
+          preview.map((msg, i) => (
+            <div key={i} className={cn("flex", msg.role === 'user' ? "justify-end" : "justify-start")}>
+              <div className={cn(
+                "max-w-[85%] rounded-2xl px-3 py-2",
+                msg.role === 'bot'
+                  ? "rounded-tl-sm bg-slate-800 text-slate-100"
+                  : "rounded-tr-sm bg-primary/20 text-white",
+              )}>
+                <p className="text-xs leading-relaxed whitespace-pre-wrap">
+                  {msg.role === 'bot' && (
+                    <span className="mr-1 text-[10px] font-bold text-primary">Bot</span>
+                  )}
+                  {msg.text}
+                </p>
+                {msg.buttons && msg.buttons.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {msg.buttons.map((btn, bi) => (
+                      <div
+                        key={bi}
+                        className="rounded-lg border border-primary/30 bg-slate-900 px-2 py-1.5 text-[10px] font-medium text-primary"
+                      >
+                        {btn}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="border-t border-slate-800 px-4 py-3">
+        <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2">
+          <span className="flex-1 text-[10px] text-slate-600">User types a message…</span>
+        </div>
+        <p className="mt-1.5 text-[10px] text-slate-600 text-center">
+          Interactive preview — actual UX may vary
+        </p>
+      </div>
     </div>
   );
 }

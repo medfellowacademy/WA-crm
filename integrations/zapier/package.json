@@ -1,0 +1,15 @@
+{
+  "name": "wacrm-zapier",
+  "version": "1.0.0",
+  "description": "Zapier integration for WaCRM — connect WhatsApp CRM to 6000+ apps",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test",
+    "push": "zapier push",
+    "validate": "zapier validate"
+  },
+  "dependencies": {
+    "zapier-platform-core": "16.4.1"
+  },
+  "private": true
+}

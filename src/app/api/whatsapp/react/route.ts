@@ -8,6 +8,8 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit';
+import { resolveWaCredentials } from '@/lib/whatsapp/credentials';
+import { supabaseAdmin } from '@/lib/flows/admin-client';
 
 /**
  * POST /api/whatsapp/react
@@ -71,7 +73,7 @@ export async function POST(request: Request) {
 
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
-      .select('id, user_id, contact:contacts(phone)')
+      .select('id, user_id, org_id, whatsapp_number_id, contact:contacts(phone)')
       .eq('id', targetMessage.conversation_id)
       .eq('user_id', user.id)
       .maybeSingle();
@@ -93,26 +95,43 @@ export async function POST(request: Request) {
       );
     }
 
-    // WhatsApp config + access token
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('phone_number_id, access_token')
-      .eq('user_id', user.id)
-      .single();
+    // Resolve credentials — multi-WABA or legacy
+    let phoneNumberId: string;
+    let accessToken: string;
 
-    if (configError || !config) {
-      return NextResponse.json(
-        { error: 'WhatsApp not configured.' },
-        { status: 400 },
-      );
+    if (conversation.org_id) {
+      try {
+        const creds = await resolveWaCredentials(
+          supabaseAdmin(),
+          conversation.org_id,
+          conversation.whatsapp_number_id,
+        );
+        phoneNumberId = creds.phoneNumberId;
+        accessToken   = creds.accessToken;
+      } catch (err) {
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : 'WhatsApp not configured' },
+          { status: 400 },
+        );
+      }
+    } else {
+      const { data: config, error: configError } = await supabase
+        .from('whatsapp_config')
+        .select('phone_number_id, access_token')
+        .eq('user_id', user.id)
+        .single();
+      if (configError || !config) {
+        return NextResponse.json({ error: 'WhatsApp not configured.' }, { status: 400 });
+      }
+      phoneNumberId = config.phone_number_id;
+      accessToken   = decrypt(config.access_token);
     }
 
-    const accessToken = decrypt(config.access_token);
     const sanitizedPhone = sanitizePhoneForMeta(contact.phone);
 
     try {
       await sendReactionMessage({
-        phoneNumberId: config.phone_number_id,
+        phoneNumberId,
         accessToken,
         to: sanitizedPhone,
         targetMessageId: targetMessage.message_id,

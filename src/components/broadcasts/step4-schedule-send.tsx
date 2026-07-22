@@ -15,6 +15,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { ArrowLeft, Send, Loader2, Users, Save } from 'lucide-react';
+import { CostEstimate } from './cost-estimate';
 
 interface AudienceConfig {
   type: string;
@@ -141,6 +142,11 @@ export function Step4ScheduleSend({
           </div>
         </div>
       </div>
+
+      {/* Estimated Meta cost before sending */}
+      {!loadingReach && estimatedReach > 0 && (
+        <CostEstimate recipients={estimatedReach} category={template.category} />
+      )}
 
       {/* Processing overlay */}
       {isProcessing && (

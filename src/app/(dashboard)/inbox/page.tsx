@@ -8,6 +8,7 @@ import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
+import { BulkActionBar } from "@/components/inbox/bulk-action-bar";
 import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -494,6 +495,7 @@ export default function InboxPage() {
   // it back to the list. On lg+ both panes render side-by-side as
   // before, unchanged.
   const hasActiveConv = !!activeConversation;
+  const [selectedConvIds, setSelectedConvIds] = useState<string[]>([]);
 
   return (
     <div className="-m-4 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden sm:-m-6">
@@ -524,6 +526,8 @@ export default function InboxPage() {
             conversations={conversations}
             onConversationsLoaded={handleConversationsLoaded}
             resyncToken={resyncToken}
+            selectedIds={selectedConvIds}
+            onSelectionChange={setSelectedConvIds}
           />
         </div>
 
@@ -557,6 +561,13 @@ export default function InboxPage() {
           <ContactSidebar contact={activeContact} />
         </div>
       </div>
+
+      {/* Floating bulk action bar — appears when conversations are selected */}
+      <BulkActionBar
+        selectedIds={selectedConvIds}
+        onClearSelection={() => setSelectedConvIds([])}
+        onActionDone={() => setResyncToken((n) => n + 1)}
+      />
     </div>
   );
 }

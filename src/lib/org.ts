@@ -18,6 +18,17 @@ export interface Organization {
   owner_id: string
   plan: 'free' | 'starter' | 'pro' | 'business'
   created_at: string
+  // White label (migration 026)
+  logo_url?: string | null
+  app_name?: string | null
+  // SLA settings (migration 025)
+  sla_settings?: { first_response_minutes: number; resolution_hours: number } | null
+  // Billing / Stripe
+  stripe_customer_id?: string | null
+  stripe_subscription_id?: string | null
+  subscription_status?: string | null
+  plan_period_start?: string | null
+  plan_period_end?: string | null
 }
 
 /**

@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Trash2, Plus, Zap, Bot, ExternalLink, CheckCircle2, XCircle } from 'lucide-react'
+import { Trash2, Plus, Zap, Bot, ExternalLink, CheckCircle2, XCircle, Key, Copy, Sheet, ShoppingBag, Loader2, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 
 const ALL_EVENTS = [
@@ -298,9 +298,315 @@ function OpenAISection() {
   )
 }
 
+// ── API Keys section ─────────────────────────────────────────
+interface ApiKey {
+  id: string
+  name: string
+  key_prefix: string
+  scopes: string[]
+  last_used_at: string | null
+  created_at: string
+}
+
+function ApiKeysSection() {
+  const [keys, setKeys] = useState<ApiKey[]>([])
+  const [loading, setLoading] = useState(true)
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [scopes, setScopes] = useState<string[]>(['read', 'write'])
+  const [saving, setSaving] = useState(false)
+  // The plaintext key is returned exactly once — held here until dismissed.
+  const [newKey, setNewKey] = useState<string | null>(null)
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    const res = await fetch('/api/integrations/api-keys')
+    const d = await res.json()
+    setKeys(d.keys ?? [])
+    setLoading(false)
+  }
+
+  function toggleScope(s: string) {
+    setScopes(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])
+  }
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault()
+    if (!name.trim()) { toast.error('Name is required'); return }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/integrations/api-keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, scopes }),
+      })
+      const d = await res.json()
+      if (!res.ok) { toast.error(d.error ?? 'Failed to create key'); return }
+      setNewKey(d.plaintext)
+      setName('')
+      setScopes(['read', 'write'])
+      setAdding(false)
+      load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function revoke(id: string) {
+    if (!confirm('Revoke this key? Any integration using it will stop working immediately.')) return
+    const res = await fetch(`/api/integrations/api-keys/${id}`, { method: 'DELETE' })
+    if (res.ok) { toast.success('Key revoked'); load() }
+    else toast.error('Failed to revoke')
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Key className="h-5 w-5 text-primary" />
+          <h3 className="font-semibold text-white">API Keys</h3>
+        </div>
+        <Button size="sm" onClick={() => setAdding(v => !v)}
+          className="bg-primary text-primary-foreground hover:bg-primary/90 h-8">
+          <Plus className="h-3.5 w-3.5 mr-1" /> New key
+        </Button>
+      </div>
+      <p className="text-sm text-slate-400">
+        Authenticate the REST API at <code className="text-slate-300">/api/v1</code> to push contacts,
+        add tags, and sync data from Zapier, Make, n8n, Google Sheets, or your own backend.
+      </p>
+
+      {/* One-time plaintext reveal */}
+      {newKey && (
+        <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-4 space-y-2">
+          <p className="text-xs font-medium text-green-400">
+            Copy your key now — you won&apos;t be able to see it again.
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs text-slate-200 break-all font-mono">{newKey}</code>
+            <Button size="icon" variant="outline"
+              className="h-8 w-8 shrink-0 border-slate-700 text-slate-300 hover:bg-slate-800"
+              onClick={() => { navigator.clipboard.writeText(newKey); toast.success('Copied!') }}>
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          <button onClick={() => setNewKey(null)}
+            className="text-xs text-slate-400 hover:text-slate-200 underline underline-offset-2">
+            I&apos;ve saved it — dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Add form */}
+      {adding && (
+        <form onSubmit={create} className="rounded-lg border border-slate-700 bg-slate-800/60 p-4 space-y-4">
+          <div className="space-y-1.5">
+            <Label className="text-slate-300 text-xs">Name</Label>
+            <Input value={name} onChange={e => setName(e.target.value)} placeholder="Zapier production"
+              required className="border-slate-700 bg-slate-800 text-white placeholder:text-slate-500 h-8 text-sm" />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-slate-300 text-xs">Permissions</Label>
+            <div className="flex gap-2">
+              {[{ id: 'read', label: 'Read' }, { id: 'write', label: 'Write' }].map(s => (
+                <button key={s.id} type="button" onClick={() => toggleScope(s.id)}
+                  className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                    scopes.includes(s.id)
+                      ? 'border-primary/40 bg-primary/10 text-primary'
+                      : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
+                  }`}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button type="button" variant="outline" size="sm" onClick={() => setAdding(false)}
+              className="border-slate-700 text-slate-300 hover:bg-slate-800 h-8">Cancel</Button>
+            <Button type="submit" size="sm" disabled={saving}
+              className="bg-primary text-primary-foreground hover:bg-primary/90 h-8">
+              {saving ? 'Creating…' : 'Create key'}
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {/* Key list */}
+      {loading ? (
+        <div className="space-y-2">
+          {[1, 2].map(i => <div key={i} className="h-12 rounded-lg bg-slate-800/60 animate-pulse" />)}
+        </div>
+      ) : keys.length === 0 ? (
+        <p className="text-sm text-slate-500 text-center py-4">No API keys yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {keys.map(k => (
+            <div key={k.id} className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/40 px-4 py-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-white">{k.name}</p>
+                <p className="text-xs text-slate-500 font-mono truncate">{k.key_prefix}…</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="hidden sm:flex flex-wrap gap-1">
+                  {k.scopes.map(s => (
+                    <Badge key={s} className="text-xs bg-slate-700/60 text-slate-300 border-slate-600 px-1.5 py-0">
+                      {s}
+                    </Badge>
+                  ))}
+                </div>
+                <span className="text-xs text-slate-500 hidden sm:inline">
+                  {k.last_used_at ? `used ${new Date(k.last_used_at).toLocaleDateString()}` : 'never used'}
+                </span>
+                <Button variant="ghost" size="icon" onClick={() => revoke(k.id)}
+                  className="h-7 w-7 text-slate-500 hover:text-red-400 hover:bg-red-500/10">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Native integrations (Google Sheets, Shopify) ─────────────
+interface ProviderState {
+  available: boolean
+  connected: boolean
+  meta: { external_id?: string | null } | null
+}
+interface ConnectionsState {
+  google_sheets: ProviderState
+  shopify: ProviderState
+}
+
+function NativeIntegrationsSection() {
+  const [state, setState] = useState<ConnectionsState | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [shopDomain, setShopDomain] = useState('')
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    const res = await fetch('/api/integrations/connections')
+    if (res.ok) setState(await res.json())
+    setLoading(false)
+  }
+
+  async function disconnect(provider: string) {
+    if (!confirm('Disconnect this integration?')) return
+    setBusy(provider)
+    await fetch(`/api/integrations/connections?provider=${provider}`, { method: 'DELETE' })
+    await load()
+    setBusy(null)
+  }
+
+  async function syncSheets() {
+    setBusy('google_sheets_sync')
+    try {
+      const res = await fetch('/api/integrations/google/sync', { method: 'POST' })
+      const d = await res.json()
+      if (!res.ok) { toast.error(d.error ?? 'Sync failed'); return }
+      toast.success(`Exported ${d.exported} contacts`)
+      if (d.spreadsheet_url) window.open(d.spreadsheet_url, '_blank')
+    } finally { setBusy(null) }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-5">
+      <div className="flex items-center gap-2">
+        <RefreshCw className="h-5 w-5 text-primary" />
+        <h3 className="font-semibold text-white">Native Integrations</h3>
+      </div>
+      <p className="text-sm text-slate-400">
+        Connect directly — no Zapier required. New customers and orders flow straight into your CRM.
+      </p>
+
+      {loading ? (
+        <div className="space-y-2">
+          {[1, 2].map(i => <div key={i} className="h-16 rounded-lg bg-slate-800/60 animate-pulse" />)}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* Google Sheets */}
+          <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-4">
+            <div className="flex items-center gap-3">
+              <Sheet className="h-5 w-5 text-green-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-white">Google Sheets</p>
+                <p className="text-xs text-slate-500">Export contacts to a live spreadsheet.</p>
+              </div>
+              {!state?.google_sheets.available ? (
+                <span className="text-xs text-slate-500">Not configured</span>
+              ) : state.google_sheets.connected ? (
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={syncSheets} disabled={busy === 'google_sheets_sync'}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 h-8">
+                    {busy === 'google_sheets_sync'
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <><RefreshCw className="h-3.5 w-3.5 mr-1" /> Sync</>}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => disconnect('google_sheets')}
+                    className="h-8 text-slate-400 hover:text-red-400">Disconnect</Button>
+                </div>
+              ) : (
+                <Button size="sm" render={<a href="/api/integrations/google/connect" />}
+                  className="bg-primary text-primary-foreground hover:bg-primary/90 h-8">Connect</Button>
+              )}
+            </div>
+          </div>
+
+          {/* Shopify */}
+          <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-4">
+            <div className="flex items-center gap-3">
+              <ShoppingBag className="h-5 w-5 text-emerald-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-white">Shopify</p>
+                <p className="text-xs text-slate-500">
+                  {state?.shopify.connected
+                    ? `Connected: ${state.shopify.meta?.external_id ?? 'store'}`
+                    : 'New orders & customers create contacts automatically.'}
+                </p>
+              </div>
+              {!state?.shopify.available ? (
+                <span className="text-xs text-slate-500">Not configured</span>
+              ) : state.shopify.connected ? (
+                <Button size="sm" variant="ghost" onClick={() => disconnect('shopify')}
+                  className="h-8 text-slate-400 hover:text-red-400">Disconnect</Button>
+              ) : null}
+            </div>
+            {state?.shopify.available && !state.shopify.connected && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  if (shopDomain.trim()) window.location.href = `/api/integrations/shopify/connect?shop=${encodeURIComponent(shopDomain.trim())}`
+                }}
+                className="mt-3 flex gap-2">
+                <Input value={shopDomain} onChange={e => setShopDomain(e.target.value)}
+                  placeholder="your-store.myshopify.com"
+                  className="border-slate-700 bg-slate-800 text-white placeholder:text-slate-500 h-8 text-sm" />
+                <Button type="submit" size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 h-8 shrink-0">
+                  Connect
+                </Button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function IntegrationsPanel() {
   return (
     <div className="space-y-6">
+      <NativeIntegrationsSection />
+      <ApiKeysSection />
       <WebhooksSection />
       <OpenAISection />
     </div>

@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { sendTemplateMessage, sendTextMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils'
+import { resolveWaCredentials } from '@/lib/whatsapp/credentials'
+import { supabaseAdmin } from '@/lib/flows/admin-client'
 
 /**
  * Handle button responses from broadcasts and send auto-replies.
@@ -91,21 +93,31 @@ export async function POST(request: Request) {
       )
     }
 
-    // 4. Get WhatsApp config
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('user_id', user.id)
-      .single()
+    // 4. Resolve WhatsApp credentials — multi-WABA or legacy
+    let phoneNumberId: string
+    let accessToken: string
 
-    if (configError || !config) {
-      return NextResponse.json(
-        { error: 'WhatsApp not configured' },
-        { status: 400 }
-      )
+    if (broadcast.org_id) {
+      try {
+        const creds = await resolveWaCredentials(supabaseAdmin(), broadcast.org_id)
+        phoneNumberId = creds.phoneNumberId
+        accessToken   = creds.accessToken
+      } catch {
+        return NextResponse.json({ error: 'WhatsApp not configured' }, { status: 400 })
+      }
+    } else {
+      const { data: config, error: configError } = await supabase
+        .from('whatsapp_config')
+        .select('*')
+        .eq('user_id', user.id)
+        .single()
+      if (configError || !config) {
+        return NextResponse.json({ error: 'WhatsApp not configured' }, { status: 400 })
+      }
+      phoneNumberId = config.phone_number_id
+      accessToken   = decrypt(config.access_token)
     }
 
-    const accessToken = decrypt(config.access_token)
     const sanitized = sanitizePhoneForMeta(contact.phone_number)
 
     if (!isValidE164(sanitized)) {
@@ -126,7 +138,7 @@ export async function POST(request: Request) {
         }
 
         const result = await sendTemplateMessage({
-          phoneNumberId: config.phone_number_id,
+          phoneNumberId,
           accessToken,
           to: sanitized,
           templateName: broadcast.auto_reply_template_name,
@@ -140,7 +152,7 @@ export async function POST(request: Request) {
         }
 
         const result = await sendTextMessage({
-          phoneNumberId: config.phone_number_id,
+          phoneNumberId,
           accessToken,
           to: sanitized,
           text: broadcast.auto_reply_text,

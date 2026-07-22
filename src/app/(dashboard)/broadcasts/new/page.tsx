@@ -9,7 +9,7 @@ import { Step1ChooseTemplate } from '@/components/broadcasts/step1-choose-templa
 import { Step2SelectAudience } from '@/components/broadcasts/step2-select-audience';
 import { Step3Personalize } from '@/components/broadcasts/step3-personalize';
 import { Step4ScheduleSend } from '@/components/broadcasts/step4-schedule-send';
-import { AutoReplyConfigurator } from '@/components/broadcasts/auto-reply-configurator';
+import { AutoReplyConfigurator, type AutoReplyConfig } from '@/components/broadcasts/auto-reply-configurator';
 import { useBroadcastSending } from '@/hooks/use-broadcast-sending';
 import { Check } from 'lucide-react';
 
@@ -42,13 +42,13 @@ export default function NewBroadcastPage() {
     Record<string, { type: 'static' | 'field' | 'custom_field'; value: string }>
   >({});
   const [name, setName] = useState('');
-  const [autoReply, setAutoReply] = useState({
+  const [autoReply, setAutoReply] = useState<AutoReplyConfig>({
     enabled: false,
-    type: 'template' as 'template' | 'text',
-    templateName: undefined as string | undefined,
+    type: 'template',
+    templateName: undefined,
     templateLanguage: 'en_US',
-    text: undefined as string | undefined,
-    buttonIds: [] as string[],
+    text: undefined,
+    buttonIds: [],
   });
 
   async function handleSend() {

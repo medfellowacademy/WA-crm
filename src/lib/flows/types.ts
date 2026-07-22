@@ -224,6 +224,8 @@ export interface FlowRunRow {
   id: string;
   flow_id: string;
   user_id: string;
+  /** Populated at run-start from the input orgId so senders pick the right WABA number */
+  org_id?: string | null;
   contact_id: string | null;
   conversation_id: string | null;
   status:
@@ -293,6 +295,8 @@ export type ParsedInbound =
 
 export interface DispatchInboundInput {
   userId: string;
+  /** org_id — threaded through so flow send steps use the right WABA number */
+  orgId?: string | null;
   contactId: string;
   conversationId: string;
   message: ParsedInbound;

@@ -13,6 +13,7 @@ import {
   LayoutTemplate,
   ImageOff,
   CornerDownLeft,
+  Lock,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
@@ -249,10 +250,28 @@ export function MessageBubble({
   onToggleReaction,
 }: MessageBubbleProps) {
   const isAgent = message.sender_type === "agent" || message.sender_type === "bot";
+  const isInternal = message.is_internal === true;
   const time = format(new Date(message.created_at), "HH:mm");
 
-  // Row alignment + width cap are owned by <MessageActions> so its hover
-  // group matches the bubble's content area, not the full row.
+  if (isInternal) {
+    return (
+      <div className="flex flex-col items-stretch">
+        <div className="mx-auto w-full max-w-[85%] rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+          <div className="mb-1 flex items-center gap-1.5">
+            <Lock className="h-3 w-3 text-amber-400" />
+            <span className="text-[10px] font-medium uppercase tracking-wide text-amber-400">
+              Internal note
+            </span>
+          </div>
+          <MessageContent message={message} />
+          <div className="mt-1 flex items-center justify-end">
+            <span className="text-[10px] text-amber-400/60">{time}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(

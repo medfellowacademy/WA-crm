@@ -3,6 +3,14 @@
     {
       "path": "/api/cron/broadcast-queue",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/sla-check",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/ai-agent",
+      "schedule": "* * * * *"
     }
   ]
 }

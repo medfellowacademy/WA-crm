@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ModuleHelpBanner } from "@/components/ui/module-help-banner";
+import { HelpTooltip } from "@/components/ui/help-tooltip";
 import {
   Dialog,
   DialogContent,
@@ -198,6 +200,12 @@ export default function FlowsPage() {
 
   return (
     <div className="space-y-6 p-6">
+      <ModuleHelpBanner storageKey="wacrm_help_flows" title="What are Flows (Automations)?">
+        <p>Flows are automated WhatsApp conversations — chatbots that reply instantly, without an agent.</p>
+        <p className="mt-1"><span className="font-medium text-slate-300">Example:</span> A customer texts "MENU" → the flow sends a list of options as buttons → they tap "Book Appointment" → the flow replies with your availability.</p>
+        <p className="mt-1"><span className="font-medium text-slate-300">Tip:</span> Start from a template — the Welcome Menu or FAQ Bot templates take under 5 minutes to set up.</p>
+      </ModuleHelpBanner>
+
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
@@ -205,6 +213,11 @@ export default function FlowsPage() {
             <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
               Beta
             </span>
+            <HelpTooltip side="bottom">
+              <p>A Flow is a branching conversation tree. When a customer sends a trigger word (like "HELP" or "MENU"), the flow kicks in and replies automatically with buttons, text, or media.</p>
+              <p className="mt-1.5">Human agents can take over at any point by replying in the inbox — the flow pauses while an agent is active.</p>
+              <p className="mt-1.5">You can track how many times each flow ran in the "runs" counter on each card.</p>
+            </HelpTooltip>
           </div>
           <p className="mt-1 text-sm text-slate-400">
             Build branching, button-driven WhatsApp conversations. Useful for

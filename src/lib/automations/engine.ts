@@ -37,6 +37,8 @@ export interface AutomationContext {
 
 export interface DispatchInput {
   userId: string
+  /** org_id — passed through to send steps so they pick the right WABA number */
+  orgId?: string | null
   triggerType: AutomationTriggerType
   contactId?: string | null
   context?: AutomationContext
@@ -107,15 +109,20 @@ export async function resumePendingExecution(pending: {
   }
 
   try {
+    const ctx = pending.context ?? {}
+    // _orgId was stashed into context at enqueue time so it survives
+    // the wait and is available when the resumed send steps run.
+    const orgId = (ctx as Record<string, unknown>)._orgId as string | undefined
     await executeStepsFrom({
       automation: automation as Automation,
       contactId: pending.contact_id,
-      context: pending.context ?? {},
+      context: ctx,
       parentStepId: pending.parent_step_id,
       branch: pending.branch,
       startPosition: pending.next_step_position,
       logId: pending.log_id,
       triggerEvent: 'resumed_wait',
+      orgId: orgId ?? null,
     })
     await markPending(pending.id, 'done')
   } catch (err) {
@@ -157,6 +164,7 @@ async function executeAutomation(automation: Automation, input: DispatchInput) {
     branch: null,
     startPosition: 0,
     logId: log.id,
+    orgId: input.orgId,
     triggerEvent: input.triggerType,
   })
 
@@ -181,6 +189,7 @@ interface ExecuteArgs {
   startPosition: number
   logId: string | null
   triggerEvent: string
+  orgId?: string | null
 }
 
 async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
@@ -229,7 +238,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
         parent_step_id: args.parentStepId,
         branch: args.branch,
         next_step_position: step.position + 1,
-        context: args.context,
+        context: { ...args.context, _orgId: args.orgId ?? undefined },
         run_at: new Date(Date.now() + ms).toISOString(),
         status: 'pending',
       })
@@ -307,6 +316,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       const conversationId = await resolveConversationId(args)
       const { whatsapp_message_id } = await engineSendText({
         userId: args.automation.user_id,
+        orgId: args.orgId,
         conversationId,
         contactId: args.contactId,
         text,
@@ -339,6 +349,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         : []
       const { whatsapp_message_id } = await engineSendTemplate({
         userId: args.automation.user_id,
+        orgId: args.orgId,
         conversationId,
         contactId: args.contactId,
         templateName: cfg.template_name,
@@ -455,6 +466,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       })
       const { whatsapp_message_id } = await engineSendText({
         userId: args.automation.user_id,
+        orgId: args.orgId,
         conversationId,
         contactId: args.contactId,
         text: reply,

@@ -27,12 +27,12 @@ export async function GET() {
         .eq('org_id', org.id).not('accepted_at', 'is', null),
     ])
 
-    const planId = (org as Record<string, unknown>).plan as string ?? 'free'
+    const planId = org.plan ?? 'free'
     const limits = getPlan(planId)
 
     return NextResponse.json({
       plan: planId,
-      subscription_status: (org as Record<string, unknown>).subscription_status ?? 'free',
+      subscription_status: org.subscription_status ?? 'free',
       limits,
       usage: {
         messages:   usageRes.data?.messages_sent   ?? 0,

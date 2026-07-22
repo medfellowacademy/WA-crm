@@ -8,6 +8,7 @@ import {
   phoneVariants,
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
+import { resolveWaCredentials } from '@/lib/whatsapp/credentials'
 
 // How many recipients to send per server invocation.
 // Keep low enough to fit within Vercel's 60s function timeout.
@@ -85,19 +86,33 @@ export async function POST(
     return NextResponse.json({ skipped: true })
   }
 
-  // Fetch WhatsApp config for this user
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('user_id', broadcast.user_id)
-    .single()
+  // Resolve WhatsApp credentials — multi-WABA path (org has whatsapp_numbers)
+  // with legacy fallback (per-user whatsapp_config).
+  let phoneNumberId: string
+  let accessToken: string
 
-  if (configErr || !config) {
-    await db.from('broadcasts').update({ status: 'failed' }).eq('id', broadcastId)
-    return NextResponse.json({ error: 'WhatsApp not configured' }, { status: 400 })
+  if (broadcast.org_id) {
+    try {
+      const creds = await resolveWaCredentials(db, broadcast.org_id)
+      phoneNumberId = creds.phoneNumberId
+      accessToken   = creds.accessToken
+    } catch {
+      await db.from('broadcasts').update({ status: 'failed' }).eq('id', broadcastId)
+      return NextResponse.json({ error: 'WhatsApp not configured for this organization' }, { status: 400 })
+    }
+  } else {
+    const { data: config, error: configErr } = await db
+      .from('whatsapp_config')
+      .select('*')
+      .eq('user_id', broadcast.user_id)
+      .single()
+    if (configErr || !config) {
+      await db.from('broadcasts').update({ status: 'failed' }).eq('id', broadcastId)
+      return NextResponse.json({ error: 'WhatsApp not configured' }, { status: 400 })
+    }
+    phoneNumberId = config.phone_number_id
+    accessToken   = decrypt(config.access_token)
   }
-
-  const accessToken = decrypt(config.access_token)
 
   // Fetch a batch of pending recipients with their contact data
   const { data: recipients, error: recipientsErr } = await db
@@ -169,6 +184,16 @@ export async function POST(
       continue
     }
 
+    // Skip opted-out contacts — compliance requirement
+    if (contact.is_opted_out) {
+      await db
+        .from('broadcast_recipients')
+        .update({ status: 'failed', error_message: 'Contact has opted out (STOP)' })
+        .eq('id', recipient.id)
+      failedCount++
+      continue
+    }
+
     const sanitized = sanitizePhoneForMeta(contact.phone)
     if (!isValidE164(sanitized)) {
       await db
@@ -192,7 +217,7 @@ export async function POST(
     for (const variant of variants) {
       try {
         const result = await sendTemplateMessage({
-          phoneNumberId: config.phone_number_id,
+          phoneNumberId,
           accessToken,
           to: variant,
           templateName: broadcast.template_name,

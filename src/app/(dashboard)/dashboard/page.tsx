@@ -7,6 +7,7 @@ import {
   UserPlus,
   DollarSign,
   Send,
+  TrendingUp,
 } from 'lucide-react'
 
 import {
@@ -25,12 +26,14 @@ import type {
 } from '@/lib/dashboard/types'
 
 import { MetricCard } from '@/components/dashboard/metric-card'
+import { OnboardingChecklist } from '@/components/dashboard/onboarding-checklist'
 import { SkeletonCard } from '@/components/dashboard/skeleton'
 import { QuickActions } from '@/components/dashboard/quick-actions'
 import { ConversationsChart } from '@/components/dashboard/conversations-chart'
 import { PipelineDonut } from '@/components/dashboard/pipeline-donut'
 import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
+import { SlaAlertsWidget } from '@/components/dashboard/sla-alerts-widget'
 
 type RangeDays = 7 | 30 | 90
 
@@ -57,6 +60,9 @@ export default function DashboardPage() {
 
   const [activity, setActivity] = useState<ActivityItem[] | null>(null)
   const [activityLoading, setActivityLoading] = useState(true)
+
+  const [revenue, setRevenue] = useState<{ total: number; this_month: number; count: number } | null>(null)
+  const [revenueLoading, setRevenueLoading] = useState(true)
 
   const loadAll = useCallback(() => {
     const db = createClient()
@@ -106,6 +112,12 @@ export default function DashboardPage() {
         console.error('[dashboard] activity failed:', msg)
       })
       .finally(() => setActivityLoading(false))
+
+    void fetch('/api/analytics/revenue')
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d) setRevenue(d) })
+      .catch(() => {})
+      .finally(() => setRevenueLoading(false))
   }, [])
 
   useEffect(() => {
@@ -140,10 +152,13 @@ export default function DashboardPage() {
         </p>
       </div>
 
+      {/* Activation checklist — self-hides once complete or dismissed */}
+      <OnboardingChecklist />
+
       {/* Metric cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {metricsLoading || !metrics ? (
-          Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
+          Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} />)
         ) : (
           <>
             <MetricCard
@@ -187,6 +202,16 @@ export default function DashboardPage() {
                 ),
               }}
             />
+            {revenueLoading ? (
+              <SkeletonCard />
+            ) : (
+              <MetricCard
+                title="Revenue Won"
+                value={formatCurrency(revenue?.this_month ?? 0)}
+                icon={TrendingUp}
+                subtitle={`${revenue?.count ?? 0} deal${(revenue?.count ?? 0) === 1 ? '' : 's'} closed`}
+              />
+            )}
           </>
         )}
       </div>
@@ -218,8 +243,15 @@ export default function DashboardPage() {
       {/* Response time */}
       <ResponseTimeChart data={responseTime} loading={responseTimeLoading} />
 
-      {/* Activity feed */}
-      <ActivityFeed items={activity} loading={activityLoading} />
+      {/* SLA alerts + Activity feed */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <ActivityFeed items={activity} loading={activityLoading} />
+        </div>
+        <div>
+          <SlaAlertsWidget />
+        </div>
+      </div>
     </div>
   )
 }

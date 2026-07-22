@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  Plus, Trash2, Loader2, CheckCircle2, XCircle,
+  Trash2, Loader2, CheckCircle2, XCircle,
   Star, StarOff, Phone, Copy, ExternalLink,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,7 @@ import {
 import {
   Accordion, AccordionItem, AccordionTrigger, AccordionContent,
 } from '@/components/ui/accordion'
+import { EmbeddedSignupButton } from './embedded-signup-button'
 
 interface WaNumber {
   id: string
@@ -134,10 +135,32 @@ export function WhatsAppNumbers() {
             Connect multiple WhatsApp Business numbers. Each number can receive and send messages independently.
           </p>
         </div>
-        <Button onClick={() => { setForm(emptyForm); setDialogOpen(true) }}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground shrink-0">
-          <Plus className="size-4" /> Add Number
-        </Button>
+      </div>
+
+      {/* One-click connect (Embedded Signup) — the recommended path */}
+      <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-white">Connect WhatsApp in one click</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Sign in with Facebook and we&apos;ll provision your number automatically — no IDs or tokens to copy.
+            </p>
+          </div>
+          <div className="shrink-0">
+            <EmbeddedSignupButton
+              onConnected={load}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground"
+            />
+          </div>
+        </div>
+        <div className="mt-3 flex items-center justify-end">
+          <button
+            onClick={() => { setForm(emptyForm); setDialogOpen(true) }}
+            className="text-xs text-slate-400 hover:text-slate-200 underline underline-offset-2"
+          >
+            Or connect manually with API credentials
+          </button>
+        </div>
       </div>
 
       {/* Webhook URL banner */}

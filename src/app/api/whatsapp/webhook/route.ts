@@ -7,6 +7,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchWebhookEvent } from '@/lib/integrations/webhooks'
+import { resolveWaCredentials } from '@/lib/whatsapp/credentials'
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,6 +48,19 @@ interface WhatsAppMessage {
   }
   /** Present when the customer swipe-replies to one of our messages. */
   context?: { id: string }
+  /**
+   * Present when the conversation was started by tapping a Click-to-WhatsApp
+   * ad (or a post CTA). Drives ad → conversation → revenue attribution.
+   */
+  referral?: {
+    source_url?: string
+    source_id?: string
+    source_type?: string
+    headline?: string
+    body?: string
+    media_type?: string
+    ctwa_clid?: string
+  }
 }
 
 interface WhatsAppWebhookEntry {
@@ -89,29 +103,32 @@ export async function GET(request: Request) {
       )
     }
 
-    // Fetch all whatsapp configs to check verify tokens
-    const { data: configs, error: configError } = await supabaseAdmin()
-      .from('whatsapp_config')
-      .select('id, verify_token')
+    // Check whatsapp_numbers first (multi-WABA), then fall back to
+    // whatsapp_config (legacy single-number accounts).
+    const [numbersResult, configsResult] = await Promise.all([
+      supabaseAdmin().from('whatsapp_numbers').select('id, verify_token'),
+      supabaseAdmin().from('whatsapp_config').select('id, verify_token'),
+    ])
 
-    if (configError || !configs) {
-      console.error('Error fetching configs for verification:', configError)
-      return NextResponse.json(
-        { error: 'Verification failed' },
-        { status: 403 }
-      )
+    const allRows: { id: string; verify_token: string | null; table: string }[] = [
+      ...(numbersResult.data ?? []).map((r: { id: string; verify_token: string | null }) => ({ ...r, table: 'whatsapp_numbers' })),
+      ...(configsResult.data ?? []).map((r: { id: string; verify_token: string | null }) => ({ ...r, table: 'whatsapp_config' })),
+    ]
+
+    if (numbersResult.error) console.error('Error fetching whatsapp_numbers for verification:', numbersResult.error)
+    if (configsResult.error) console.error('Error fetching whatsapp_config for verification:', configsResult.error)
+
+    if (allRows.length === 0) {
+      return NextResponse.json({ error: 'Verification failed' }, { status: 403 })
     }
 
-    // Check if any config's verify_token matches. Also collect the
-    // matching row so we can opportunistically upgrade its token to
-    // GCM if it was still in the legacy CBC format.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let matchedConfig: any = null
-    for (const config of configs) {
-      if (!config.verify_token) continue
+    for (const row of allRows) {
+      if (!row.verify_token) continue
       try {
-        if (decrypt(config.verify_token) === verifyToken) {
-          matchedConfig = config
+        if (decrypt(row.verify_token) === verifyToken) {
+          matchedConfig = row
           break
         }
       } catch {
@@ -120,11 +137,10 @@ export async function GET(request: Request) {
     }
 
     if (matchedConfig) {
-      // Fire-and-forget GCM upgrade. Safe to run on every subscribe
-      // since it's a no-op once the column is already GCM.
+      // Fire-and-forget GCM upgrade on the matched row's table.
       if (isLegacyFormat(matchedConfig.verify_token)) {
         void supabaseAdmin()
-          .from('whatsapp_config')
+          .from(matchedConfig.table)
           .update({ verify_token: encrypt(verifyToken) })
           .eq('id', matchedConfig.id)
           .then(({ error }: { error: unknown }) => {
@@ -205,19 +221,48 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
 
       const phoneNumberId = value.metadata.phone_number_id
 
-      // Find user's config by phone_number_id
-      const { data: config, error: configError } = await supabaseAdmin()
-        .from('whatsapp_config')
-        .select('*')
-        .eq('phone_number_id', phoneNumberId)
-        .single()
+      // ── Resolve credentials: whatsapp_numbers first (multi-WABA),
+      //    fall back to whatsapp_config (legacy single-number accounts).
+      let userId: string
+      let orgId: string | null
+      let decryptedAccessToken: string
+      let waNumberId: string | null = null
 
-      if (configError || !config) {
-        console.error('No config found for phone_number_id:', phoneNumberId)
-        continue
+      const { data: waNumber } = await supabaseAdmin()
+        .from('whatsapp_numbers')
+        .select('id, org_id, access_token, organizations(owner_id)')
+        .eq('phone_number_id', phoneNumberId)
+        .eq('is_active', true)
+        .maybeSingle()
+
+      if (waNumber) {
+        // Multi-WABA path — number is registered in the new table
+        orgId    = waNumber.org_id
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        userId   = (waNumber.organizations as any)?.owner_id ?? ''
+        decryptedAccessToken = decrypt(waNumber.access_token)
+        waNumberId = waNumber.id
+      } else {
+        // Legacy path — fall back to whatsapp_config keyed by phone_number_id
+        const { data: config, error: configError } = await supabaseAdmin()
+          .from('whatsapp_config')
+          .select('*')
+          .eq('phone_number_id', phoneNumberId)
+          .single()
+
+        if (configError || !config) {
+          console.error('No config found for phone_number_id:', phoneNumberId)
+          continue
+        }
+        userId   = config.user_id
+        orgId    = config.org_id ?? null
+        decryptedAccessToken = decrypt(config.access_token)
       }
 
-      const decryptedAccessToken = decrypt(config.access_token)
+      if (!userId) {
+        console.error('[webhook] Could not resolve userId for phone_number_id:', phoneNumberId)
+        continue
+      }
 
       for (let i = 0; i < value.messages.length; i++) {
         const message = value.messages[i]
@@ -226,9 +271,10 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         await processMessage(
           message,
           contact,
-          config.user_id,
-          config.org_id ?? null,
-          decryptedAccessToken
+          userId,
+          orgId,
+          decryptedAccessToken,
+          waNumberId,
         )
       }
     }
@@ -448,12 +494,58 @@ async function handleReaction(
   }
 }
 
+/**
+ * Persist Click-to-WhatsApp ad attribution. When an inbound message carries
+ * a `referral`, record it against the contact + conversation and stamp the
+ * contact's first-touch `source` (only if not already set). Best-effort:
+ * failures here must never break the main inbound flow.
+ */
+async function captureCtwaReferral(
+  message: WhatsAppMessage,
+  orgId: string,
+  contactId: string,
+  conversationId: string,
+) {
+  const ref = message.referral
+  if (!ref || (!ref.source_id && !ref.ctwa_clid && !ref.source_url)) return
+
+  try {
+    await supabaseAdmin().from('ctwa_referrals').insert({
+      org_id: orgId,
+      contact_id: contactId,
+      conversation_id: conversationId,
+      source_type: ref.source_type ?? null,
+      source_id: ref.source_id ?? null,
+      source_url: ref.source_url ?? null,
+      headline: ref.headline ?? null,
+      body: ref.body ?? null,
+      ctwa_clid: ref.ctwa_clid ?? null,
+    })
+
+    // Stamp first-touch acquisition source if the contact doesn't have one.
+    const { data: c } = await supabaseAdmin()
+      .from('contacts')
+      .select('source')
+      .eq('id', contactId)
+      .maybeSingle()
+    if (c && !c.source) {
+      await supabaseAdmin()
+        .from('contacts')
+        .update({ source: 'click_to_whatsapp' })
+        .eq('id', contactId)
+    }
+  } catch (err) {
+    console.error('[webhook] captureCtwaReferral failed:', err)
+  }
+}
+
 async function processMessage(
   message: WhatsAppMessage,
   contact: { profile: { name: string }; wa_id: string },
   userId: string,
   orgId: string | null,
-  accessToken: string
+  accessToken: string,
+  waNumberId: string | null = null,
 ) {
   const senderPhone = normalizePhone(message.from)
   const contactName = contact.profile.name
@@ -468,13 +560,21 @@ async function processMessage(
   if (!contactOutcome) return
   const contactRecord = contactOutcome.contact
 
-  // Find or create conversation
+  // Find or create conversation — stamp whatsapp_number_id so outbound
+  // replies and automations know which number to send from.
   const conversation = await findOrCreateConversation(
     userId,
     orgId,
-    contactRecord.id
+    contactRecord.id,
+    waNumberId,
   )
   if (!conversation) return
+
+  // Capture Click-to-WhatsApp ad attribution before anything else, so a
+  // first-touch from an ad is recorded even if the message is a reaction.
+  if (orgId && message.referral) {
+    await captureCtwaReferral(message, orgId, contactRecord.id, conversation.id)
+  }
 
   // Reactions short-circuit here — they aren't messages. We never insert
   // into `messages`, never bump unread_count, never update last_message_text.
@@ -578,6 +678,11 @@ async function processMessage(
   // If this contact was a recent broadcast recipient, flag the reply
   await flagBroadcastReplyIfAny(userId, contactRecord.id)
 
+  // Check for opt-out / opt-in keywords and update contact status
+  if (orgId && contentText) {
+    await handleOptOutKeyword(orgId, contactRecord.id, contentText.trim())
+  }
+
   // Fire outbound webhook integrations (Zapier etc.) — fire-and-forget
   if (orgId) {
     dispatchWebhookEvent(orgId, 'new_message', {
@@ -619,6 +724,7 @@ async function processMessage(
   // ============================================================
   const flowResult = await dispatchInboundToFlows({
     userId,
+    orgId,
     contactId: contactRecord.id,
     conversationId: conversation.id,
     message:
@@ -666,6 +772,7 @@ async function processMessage(
   for (const triggerType of automationTriggers) {
     runAutomationsForTrigger({
       userId,
+      orgId,
       triggerType,
       contactId: contactRecord.id,
       context: {
@@ -831,6 +938,31 @@ interface ContactOutcome {
   wasCreated: boolean
 }
 
+const STOP_KEYWORDS = new Set(['stop', 'unsubscribe', 'quit', 'end', 'cancel', 'optout', 'opt-out', 'arret', 'pare'])
+const START_KEYWORDS = new Set(['start', 'yes', 'subscribe', 'optin', 'opt-in', 'unstop'])
+
+async function handleOptOutKeyword(orgId: string, contactId: string, text: string) {
+  const word = text.toLowerCase().replace(/[^a-z\-]/g, '')
+  try {
+    if (STOP_KEYWORDS.has(word)) {
+      await supabaseAdmin()
+        .from('contact_optouts')
+        .upsert(
+          { org_id: orgId, contact_id: contactId, opted_out_at: new Date().toISOString(), opted_in_at: null, keyword: text, is_active: true, updated_at: new Date().toISOString() },
+          { onConflict: 'org_id,contact_id' }
+        )
+    } else if (START_KEYWORDS.has(word)) {
+      await supabaseAdmin()
+        .from('contact_optouts')
+        .update({ is_active: false, opted_in_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('org_id', orgId)
+        .eq('contact_id', contactId)
+    }
+  } catch (err) {
+    console.error('[optout] handleOptOutKeyword failed:', err)
+  }
+}
+
 async function findOrCreateContact(
   userId: string,
   orgId: string | null,
@@ -882,7 +1014,8 @@ async function findOrCreateContact(
 async function findOrCreateConversation(
   userId: string,
   orgId: string | null,
-  contactId: string
+  contactId: string,
+  waNumberId?: string | null,
 ) {
   const query = supabaseAdmin().from('conversations').select('*').eq('contact_id', contactId)
   const { data: existing, error: findError } = orgId
@@ -897,6 +1030,7 @@ async function findOrCreateConversation(
       user_id: userId,
       org_id: orgId,
       contact_id: contactId,
+      whatsapp_number_id: waNumberId ?? null,
     })
     .select()
     .single()

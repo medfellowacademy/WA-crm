@@ -25,6 +25,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GitBranch, Plus, ChevronDown, Settings } from "lucide-react";
+import { ModuleHelpBanner } from "@/components/ui/module-help-banner";
+import { HelpTooltip } from "@/components/ui/help-tooltip";
 import { toast } from "sonner";
 
 // Spec-defined seed — name and color per the product spec.
@@ -303,9 +305,20 @@ export default function PipelinesPage() {
 
   return (
     <div className="space-y-6">
+      <ModuleHelpBanner storageKey="wacrm_help_pipeline" title="What is the Pipeline?">
+        <p>The Pipeline is your sales CRM — a Kanban board of deals across stages like "New Lead → Qualified → Proposal → Won".</p>
+        <p className="mt-1"><span className="font-medium text-slate-300">Each deal</span> links to a contact, so you can jump straight into their WhatsApp conversation from the deal card.</p>
+        <p className="mt-1"><span className="font-medium text-slate-300">Tip:</span> Drag cards between columns as the deal progresses. You can add custom stages in Manage Pipelines.</p>
+      </ModuleHelpBanner>
+
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
+          <HelpTooltip side="bottom">
+            <p className="font-medium text-white mb-1">Pipeline (CRM)</p>
+            <p>Drag deal cards between stages as they progress. Each card links to a contact — click to open their WhatsApp thread.</p>
+            <p className="mt-1.5">Add a deal with the "+ Add Deal" button, or from any contact's detail view. Won/Lost deals are counted in pipeline analytics above the board.</p>
+          </HelpTooltip>
           {/* Pipeline selector dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger

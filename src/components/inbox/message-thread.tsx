@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import type {
   Conversation,
+  ConversationSentiment,
   Message,
   MessageReaction,
   Contact,
@@ -21,6 +22,8 @@ import {
   Clock,
   ArrowLeft,
   RefreshCw,
+  Brain,
+  Loader2 as SpinnerIcon,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +39,9 @@ import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
 import { MessageComposer } from "./message-composer";
 import { TemplatePicker } from "./template-picker";
+import { AiSuggestReply } from "./ai-suggest-reply";
+import { SentimentBadge } from "./sentiment-badge";
+import { RevenueAttribution } from "./revenue-attribution";
 import { buildReplyPreview } from "./reply-quote";
 import { toast } from "sonner";
 
@@ -173,28 +179,46 @@ export function MessageThread({
     }, 700);
   }, [isRefreshing, onRefresh]);
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
+  const [composerPrefill, setComposerPrefill] = useState<string | null>(null);
 
-  // Profiles are bounded by RLS to rows the current user is allowed to
-  // see — today that's just the current user, but the dropdown keeps the
-  // shape ready for shared-team workspaces without a refactor.
+  // Sentiment — initialised from conversation prop, updated optimistically after AI analysis
+  const [sentiment, setSentiment] = useState<ConversationSentiment | null | undefined>(
+    conversation?.sentiment,
+  );
+  const [analyzingSentiment, setAnalyzingSentiment] = useState(false);
+
+  // Revenue attribution — local shadow of the conversation columns
+  const [conversionValue, setConversionValue] = useState<number | null | undefined>(
+    conversation?.conversion_value,
+  );
+  const [convertedAt, setConvertedAt] = useState<string | null | undefined>(
+    conversation?.converted_at,
+  );
+  const [conversionNote, setConversionNote] = useState<string | null | undefined>(
+    conversation?.conversion_note,
+  );
+
+  // Fetch all org members via server-side API (bypasses RLS that limits to own row)
   useEffect(() => {
     let cancelled = false;
-    const supabase = createClient();
-    supabase
-      .from("profiles")
-      .select("*")
-      .order("full_name")
-      .then(({ data, error }) => {
+    fetch("/api/org/members")
+      .then((r) => r.json())
+      .then(({ members }) => {
         if (cancelled) return;
-        if (error) {
-          console.error("Failed to fetch profiles:", error);
-          return;
-        }
-        setProfiles((data as Profile[]) ?? []);
-      });
-    return () => {
-      cancelled = true;
-    };
+        // members have { user_id, email, role } — map to Profile shape for the dropdown
+        setProfiles(
+          (members ?? []).map((m: { user_id: string; email: string; role: string; full_name?: string }) => ({
+            id: m.user_id,
+            user_id: m.user_id,
+            full_name: m.full_name ?? m.email,
+            email: m.email,
+            role: m.role,
+            created_at: "",
+          }))
+        );
+      })
+      .catch((err) => console.error("Failed to fetch members:", err));
+    return () => { cancelled = true; };
   }, []);
 
   // 24-hour session timer
@@ -385,7 +409,11 @@ export function MessageThread({
   // a quote pulled from conversation A shouldn't bleed into conversation B.
   useEffect(() => {
     setReplyTo(null);
-  }, [conversationId]);
+    setSentiment(conversation?.sentiment);
+    setConversionValue(conversation?.conversion_value);
+    setConvertedAt(conversation?.converted_at);
+    setConversionNote(conversation?.conversion_note);
+  }, [conversationId, conversation?.sentiment, conversation?.conversion_value, conversation?.converted_at, conversation?.conversion_note]);
 
   // Reset the server-side unread_count to 0 whenever an unread count
   // surfaces on the active conversation — covers both (a) opening a
@@ -417,12 +445,11 @@ export function MessageThread({
   }, [messages]);
 
   const handleSend = useCallback(
-    async (text: string, replyToId?: string) => {
+    async (text: string, replyToId?: string, isInternal?: boolean) => {
       if (!conversation) return;
 
       const tempId = `temp-${Date.now()}`;
 
-      // Optimistic update — shows the message immediately with "sending" status
       const optimisticMsg: Message = {
         id: tempId,
         conversation_id: conversation.id,
@@ -430,11 +457,34 @@ export function MessageThread({
         content_type: "text",
         content_text: text,
         status: "sending",
+        is_internal: isInternal ?? false,
         created_at: new Date().toISOString(),
         reply_to_message_id: replyToId,
       };
       onNewMessage(optimisticMsg);
       setReplyTo(null);
+
+      // Internal notes go directly to DB, not WhatsApp
+      if (isInternal) {
+        try {
+          const res = await fetch("/api/conversations/note", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversation_id: conversation.id, text }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            toast.error(payload?.error || "Failed to save note");
+            onUpdateMessage(tempId, { status: "failed" });
+            return;
+          }
+          onUpdateMessage(tempId, { status: "sent", id: payload.id ?? tempId });
+        } catch (err) {
+          toast.error("Failed to save note");
+          onUpdateMessage(tempId, { status: "failed" });
+        }
+        return;
+      }
 
       try {
         const res = await fetch("/api/whatsapp/send", {
@@ -454,14 +504,10 @@ export function MessageThread({
           const reason = payload?.error || `HTTP ${res.status}`;
           console.error("Failed to send message:", reason);
           toast.error(`Failed to send: ${reason}`);
-          // Mark the optimistic bubble as failed so the user sees what happened
           onUpdateMessage(tempId, { status: "failed" });
           return;
         }
 
-        // Success — the realtime INSERT event will replace the temp bubble
-        // with the real DB row. If realtime hasn't arrived yet, at least
-        // flip status to 'sent' so the UI stops showing "sending".
         onUpdateMessage(tempId, { status: "sent" });
       } catch (err) {
         console.error("Failed to send message:", err);
@@ -673,6 +719,29 @@ export function MessageThread({
     [conversation, onAssignChange],
   );
 
+  const handleAnalyzeSentiment = useCallback(async () => {
+    if (!conversation || analyzingSentiment) return;
+    setAnalyzingSentiment(true);
+    try {
+      const res = await fetch('/api/ai/sentiment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: conversation.id }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        toast.error(d.error ?? 'Failed to analyze sentiment');
+        return;
+      }
+      setSentiment(d.sentiment);
+      if (d.sentiment) toast.success(`Sentiment: ${d.sentiment}`);
+    } catch {
+      toast.error('Failed to analyze sentiment');
+    } finally {
+      setAnalyzingSentiment(false);
+    }
+  }, [conversation, analyzingSentiment]);
+
   // Empty state — same WhatsApp-style doodle background as the active
   // thread below, so swapping between empty/selected doesn't change the
   // pattern under the user's eye.
@@ -743,6 +812,33 @@ export function MessageThread({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Sentiment badge + analyze button */}
+          <SentimentBadge sentiment={sentiment} size="sm" />
+          <button
+            type="button"
+            onClick={handleAnalyzeSentiment}
+            disabled={analyzingSentiment}
+            title="Analyze customer sentiment with AI"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-primary transition-colors disabled:opacity-60"
+          >
+            {analyzingSentiment
+              ? <SpinnerIcon className="h-3.5 w-3.5 animate-spin" />
+              : <Brain className="h-3.5 w-3.5" />}
+          </button>
+
+          {/* Revenue attribution */}
+          <RevenueAttribution
+            conversationId={conversation.id}
+            conversionValue={conversionValue}
+            convertedAt={convertedAt}
+            conversionNote={conversionNote}
+            onConverted={(val, note, at) => {
+              setConversionValue(val);
+              setConversionNote(note);
+              setConvertedAt(at);
+            }}
+          />
+
           {/* Manual refresh — forces a refetch of the messages + the
               conversation list (the parent bumps its resyncToken). Useful
               when realtime missed an event or the agent just wants to be
@@ -920,6 +1016,15 @@ export function MessageThread({
         )}
       </div>
 
+      {/* AI Suggest Reply */}
+      {!sessionInfo.expired && (
+        <AiSuggestReply
+          conversationId={conversation.id}
+          disabled={sessionInfo.expired}
+          onInsert={(text) => setComposerPrefill(text)}
+        />
+      )}
+
       {/* Composer */}
       <MessageComposer
         conversationId={conversation.id}
@@ -928,6 +1033,8 @@ export function MessageThread({
         onOpenTemplates={handleOpenTemplates}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
+        prefillText={composerPrefill}
+        onPrefillConsumed={() => setComposerPrefill(null)}
       />
 
       <TemplatePicker

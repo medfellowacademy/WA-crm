@@ -68,6 +68,8 @@ export interface ContactNote {
 
 export type ConversationStatus = 'open' | 'pending' | 'closed';
 
+export type ConversationSentiment = 'positive' | 'neutral' | 'negative';
+
 export interface Conversation {
   id: string;
   user_id: string;
@@ -80,6 +82,12 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   contact?: Contact;
+  // Sentiment analysis (migration 026)
+  sentiment?: ConversationSentiment | null;
+  // Revenue attribution (migration 026)
+  conversion_value?: number | null;
+  converted_at?: string | null;
+  conversion_note?: string | null;
 }
 
 export type SenderType = 'customer' | 'agent' | 'bot';
@@ -106,6 +114,7 @@ export interface Message {
   template_name?: string;
   message_id?: string;
   status: MessageStatus;
+  is_internal?: boolean;
   created_at: string;
   reply_to_message_id?: string;
   /**

@@ -354,6 +354,7 @@ async function sendButtonsAndSuspend(
   const cfg = node.config as unknown as SendButtonsNodeConfig;
   const { whatsapp_message_id } = await engineSendInteractiveButtons({
     userId: run.user_id,
+    orgId: run.org_id,
     conversationId: run.conversation_id!,
     contactId: run.contact_id!,
     bodyText: cfg.text,
@@ -389,6 +390,7 @@ async function sendListAndSuspend(
   const cfg = node.config as unknown as SendListNodeConfig;
   const { whatsapp_message_id } = await engineSendInteractiveList({
     userId: run.user_id,
+    orgId: run.org_id,
     conversationId: run.conversation_id!,
     contactId: run.contact_id!,
     bodyText: cfg.text,
@@ -574,6 +576,7 @@ async function advanceFromNodeKey(
       try {
         const { whatsapp_message_id } = await engineSendText({
           userId: run.user_id,
+          orgId: run.org_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.text, run.vars),
@@ -600,6 +603,7 @@ async function advanceFromNodeKey(
       try {
         const { whatsapp_message_id } = await engineSendText({
           userId: run.user_id,
+          orgId: run.org_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.prompt_text, run.vars),
@@ -975,6 +979,7 @@ async function handleReplyForActiveRun(
       try {
         await engineSendText({
           userId: run.user_id,
+          orgId: run.org_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.prompt_text, run.vars),
@@ -1020,6 +1025,7 @@ async function startNewRun(
     .insert({
       flow_id: flow.id,
       user_id: flow.user_id,
+      org_id: input.orgId ?? null,
       contact_id: input.contactId,
       conversation_id: input.conversationId,
       status: "active",
@@ -1058,7 +1064,6 @@ async function startNewRun(
     console.error("[flows] execution_count rpc error:", incErr.message);
   }
 
-  // Run the advance loop starting from the entry node.
   const outcome = await advanceFromNodeKey(db, run, flow.entry_node_id!, nodes);
   return {
     consumed: true,

@@ -14,6 +14,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Radio, Plus, Loader2 } from 'lucide-react';
+import { ModuleHelpBanner } from '@/components/ui/module-help-banner';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { getBroadcastStatus } from '@/lib/broadcast-status';
 
 /**
@@ -146,6 +148,12 @@ export default function BroadcastsPage() {
 
   return (
     <div className="space-y-6">
+      <ModuleHelpBanner storageKey="wacrm_help_broadcasts" title="What are Broadcasts?">
+        <p>Broadcasts let you send a single WhatsApp message to hundreds of contacts at once — for promotions, updates, or reminders.</p>
+        <p className="mt-1"><span className="font-medium text-slate-300">Before you send:</span> you need at least one approved Meta message template. Templates are created in the Meta Business Manager.</p>
+        <p className="mt-1"><span className="font-medium text-slate-300">Tip:</span> Import your contacts first so you have an audience to send to.</p>
+      </ModuleHelpBanner>
+
       {/* Top indeterminate progress bar: only visible while a broadcast
           is mid-send. Pure CSS animation so no extra deps. */}
       {anySending && (
@@ -176,7 +184,14 @@ export default function BroadcastsPage() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Broadcasts</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-white">Broadcasts</h1>
+            <HelpTooltip side="bottom">
+              <p>Broadcasts send a WhatsApp template message to many contacts at once.</p>
+              <p className="mt-1.5">Meta requires all bulk messages to use a pre-approved template. Once approved, you pick a template, choose an audience (all contacts, a tag, or a CSV), and hit Send.</p>
+              <p className="mt-1.5">Delivery, read, and reply rates appear in the table after sending.</p>
+            </HelpTooltip>
+          </div>
           <p className="mt-1 text-sm text-slate-400">
             Send bulk messages to your contacts using approved templates.
           </p>
@@ -191,15 +206,33 @@ export default function BroadcastsPage() {
       </div>
 
       {broadcasts.length === 0 ? (
-        <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-slate-800 bg-slate-900">
-          <Radio className="mb-3 h-10 w-10 text-slate-600" />
-          <p className="text-sm font-medium text-white">No broadcasts yet</p>
-          <p className="mt-1 text-xs text-slate-400">
-            Create your first broadcast to reach your contacts at scale.
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-900/50 px-6 py-14 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-800">
+            <Radio className="h-6 w-6 text-slate-500" />
+          </div>
+          <p className="mt-4 text-base font-medium text-white">No broadcasts yet</p>
+          <p className="mt-1.5 max-w-sm text-sm text-slate-400">
+            Send a WhatsApp message to hundreds of contacts at once. Perfect for promotions, reminders, and updates.
           </p>
+          <div className="mt-6 grid max-w-sm grid-cols-1 gap-2 text-left sm:grid-cols-3">
+            {[
+              { n: 1, label: 'Import contacts', href: '/contacts' },
+              { n: 2, label: 'Approve a template in Meta', href: null },
+              { n: 3, label: 'Create your first broadcast', href: null },
+            ].map(({ n, label, href }) => (
+              <div key={n} className="flex items-start gap-2 rounded-lg border border-slate-800 p-3">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-700 text-[10px] font-bold text-primary">{n}</span>
+                {href ? (
+                  <a href={href} className="text-xs text-primary underline-offset-2 hover:underline">{label}</a>
+                ) : (
+                  <span className="text-xs text-slate-400">{label}</span>
+                )}
+              </div>
+            ))}
+          </div>
           <Button
             onClick={() => router.push('/broadcasts/new')}
-            className="mt-4 bg-primary text-primary-foreground hover:bg-primary/90"
+            className="mt-6 bg-primary text-primary-foreground hover:bg-primary/90"
           >
             <Plus className="h-4 w-4" />
             New Broadcast

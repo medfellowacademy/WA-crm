@@ -16,7 +16,7 @@ export async function POST() {
 
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
     const session = await stripe().billingPortal.sessions.create({
-      customer:   org.stripe_customer_id as string,
+      customer:   org.stripe_customer_id,
       return_url: `${siteUrl}/dashboard/billing`,
     })
 

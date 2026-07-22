@@ -66,6 +66,79 @@ export async function verifyPhoneNumber(
 }
 
 // ============================================================
+// Embedded Signup (onboarding)
+// ============================================================
+
+/**
+ * Exchange the authorization code returned by Meta's Embedded Signup flow
+ * for a business access token. The token is scoped to the customer's WABA
+ * and is what we store (encrypted) to send messages on their behalf.
+ *
+ * Requires META_APP_ID + META_APP_SECRET to be set server-side.
+ */
+export async function exchangeCodeForToken(args: { code: string }): Promise<string> {
+  const appId = process.env.META_APP_ID ?? process.env.NEXT_PUBLIC_META_APP_ID
+  const appSecret = process.env.META_APP_SECRET
+  if (!appId) throw new Error('META_APP_ID is not set')
+  if (!appSecret) throw new Error('META_APP_SECRET is not set')
+
+  const url =
+    `${META_API_BASE}/oauth/access_token` +
+    `?client_id=${encodeURIComponent(appId)}` +
+    `&client_secret=${encodeURIComponent(appSecret)}` +
+    `&code=${encodeURIComponent(args.code)}`
+
+  const response = await fetch(url, { method: 'GET' })
+  if (!response.ok) {
+    await throwMetaError(response, `Token exchange failed: ${response.status}`)
+  }
+  const data = (await response.json()) as { access_token?: string }
+  if (!data.access_token) throw new Error('Token exchange returned no access_token')
+  return data.access_token
+}
+
+/**
+ * Subscribe our Meta app to a customer's WABA so that inbound messages and
+ * status updates are delivered to our webhook. Idempotent on Meta's side —
+ * re-subscribing an already-subscribed WABA is a no-op success.
+ */
+export async function subscribeAppToWaba(args: {
+  wabaId: string
+  accessToken: string
+}): Promise<void> {
+  const response = await fetch(`${META_API_BASE}/${args.wabaId}/subscribed_apps`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${args.accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Failed to subscribe app to WABA: ${response.status}`)
+  }
+}
+
+/**
+ * Register a phone number for Cloud API use (required before sending). The
+ * Embedded Signup flow usually leaves the number registered already, so a
+ * "already registered" response is treated as success by the caller.
+ */
+export async function registerPhoneNumber(args: {
+  phoneNumberId: string
+  accessToken: string
+  pin: string
+}): Promise<void> {
+  const response = await fetch(`${META_API_BASE}/${args.phoneNumberId}/register`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${args.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ messaging_product: 'whatsapp', pin: args.pin }),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Failed to register phone number: ${response.status}`)
+  }
+}
+
+// ============================================================
 // Sending
 // ============================================================
 
@@ -503,6 +576,66 @@ function validateInteractiveHeaderFooter(
       `Interactive footerText exceeds ${INTERACTIVE_LIMITS.footerMaxLength} chars.`
     )
   }
+}
+
+// ============================================================
+// Product / Catalog messages
+// ============================================================
+
+export interface SendProductMessageArgs {
+  phoneNumberId: string
+  accessToken: string
+  /** Recipient phone in E.164 format */
+  to: string
+  /** Meta Commerce catalog ID (from your business account) */
+  catalogId: string
+  /** Product retailer ID (the SKU / product_retailer_id in your catalog) */
+  productRetailerId: string
+  /** Optional body text shown above the product card */
+  bodyText?: string
+  /** Optional footer */
+  footerText?: string
+}
+
+/**
+ * Send a single-product interactive message. The recipient sees a native
+ * WhatsApp product card with the image, name, and price from your Meta
+ * Commerce catalog. They can tap "View" to see details or "Add to cart".
+ *
+ * Requires a Meta Commerce catalog linked to your WABA.
+ */
+export async function sendProductMessage(
+  args: SendProductMessageArgs
+): Promise<MetaSendResult> {
+  const { phoneNumberId, accessToken, to, catalogId, productRetailerId, bodyText, footerText } = args
+  const url = `${META_API_BASE}/${phoneNumberId}/messages`
+
+  const interactive: Record<string, unknown> = {
+    type: 'product',
+    action: { catalog_id: catalogId, product_retailer_id: productRetailerId },
+  }
+  if (bodyText) interactive.body = { text: bodyText }
+  if (footerText) interactive.footer = { text: footerText }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'interactive',
+      interactive,
+    }),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = await response.json()
+  return { messageId: data.messages[0].id }
 }
 
 // ============================================================

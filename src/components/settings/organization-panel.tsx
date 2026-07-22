@@ -24,6 +24,8 @@ interface Org {
   name: string
   slug: string
   plan: string
+  logo_url?: string | null
+  app_name?: string | null
 }
 
 const PLAN_LABELS: Record<string, string> = {
@@ -50,6 +52,9 @@ export function OrganizationPanel() {
   const [inviting, setInviting] = useState(false)
   const [orgName, setOrgName] = useState('')
   const [savingName, setSavingName] = useState(false)
+  const [appName, setAppName] = useState('')
+  const [logoUrl, setLogoUrl] = useState('')
+  const [savingBranding, setSavingBranding] = useState(false)
 
   useEffect(() => {
     load()
@@ -70,6 +75,8 @@ export function OrganizationPanel() {
 
     setOrg(orgData)
     setOrgName(orgData.name)
+    setAppName(orgData.app_name ?? '')
+    setLogoUrl(orgData.logo_url ?? '')
     setMembers(allMembers ?? [])
 
     const me = (allMembers as Member[]).find(m => m.user_id === user.id)
@@ -130,6 +137,26 @@ export function OrganizationPanel() {
     setSavingName(false)
   }
 
+  async function saveBranding(e: React.FormEvent) {
+    e.preventDefault()
+    if (!org) return
+    setSavingBranding(true)
+    const supabase = createClient()
+    const { error } = await supabase
+      .from('organizations')
+      .update({
+        app_name: appName.trim() || null,
+        logo_url: logoUrl.trim() || null,
+      })
+      .eq('id', org.id)
+    if (error) toast.error(error.message)
+    else {
+      toast.success('Branding saved — reload to see sidebar update')
+      setOrg({ ...org, app_name: appName.trim() || null, logo_url: logoUrl.trim() || null })
+    }
+    setSavingBranding(false)
+  }
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -177,6 +204,46 @@ export function OrganizationPanel() {
           </form>
         )}
       </div>
+
+      {/* White Label Branding */}
+      {myRole === 'owner' && (
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-white">White Label Branding</h3>
+            <p className="text-xs text-slate-500 mt-0.5">Customize the sidebar app name and logo shown to your team.</p>
+          </div>
+          <form onSubmit={saveBranding} className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="appName" className="text-slate-400 text-xs">App name <span className="text-slate-600">(shown in sidebar)</span></Label>
+              <Input
+                id="appName"
+                value={appName}
+                onChange={(e) => setAppName(e.target.value)}
+                placeholder="e.g. Acme Support, My CRM…"
+                className="border-slate-700 bg-slate-800 text-white placeholder:text-slate-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="logoUrl" className="text-slate-400 text-xs">Logo URL <span className="text-slate-600">(32×32 px image URL)</span></Label>
+              <div className="flex items-center gap-2">
+                {logoUrl && (
+                  <img src={logoUrl} alt="Logo preview" className="h-8 w-8 rounded object-cover shrink-0 border border-slate-700" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                )}
+                <Input
+                  id="logoUrl"
+                  value={logoUrl}
+                  onChange={(e) => setLogoUrl(e.target.value)}
+                  placeholder="https://example.com/logo.png"
+                  className="border-slate-700 bg-slate-800 text-white placeholder:text-slate-500"
+                />
+              </div>
+            </div>
+            <Button type="submit" disabled={savingBranding} className="bg-primary text-primary-foreground hover:bg-primary/90">
+              {savingBranding ? 'Saving…' : 'Save Branding'}
+            </Button>
+          </form>
+        </div>
+      )}
 
       {/* Members list */}
       <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4">

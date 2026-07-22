@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Settings, MessageSquare, Tag, User, Palette, Building2, Zap } from 'lucide-react';
+import { Settings, MessageSquare, Tag, User, Palette, Building2, Zap, ShieldCheck, Bot } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
 import { WhatsAppNumbers } from '@/components/settings/whatsapp-numbers';
@@ -13,15 +13,23 @@ import { SessionsCard } from '@/components/settings/sessions-card';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { OrganizationPanel } from '@/components/settings/organization-panel';
 import { IntegrationsPanel } from '@/components/settings/integrations-panel';
+import { QuickRepliesPanel } from '@/components/settings/quick-replies-panel';
+import { AppointmentsPanel } from '@/components/settings/appointments-panel';
+import { OptOutPanel } from '@/components/settings/optout-panel';
+import { AiAgentPanel } from '@/components/settings/ai-agent-panel';
 
 const TAB_VALUES = [
   'profile',
   'organization',
   'whatsapp',
   'templates',
+  'quick-replies',
+  'appointments',
   'tags',
   'appearance',
   'integrations',
+  'optouts',
+  'ai-agent',
 ] as const;
 type TabValue = (typeof TAB_VALUES)[number];
 
@@ -94,6 +102,20 @@ export default function SettingsPage() {
             Tags
           </TabsTrigger>
           <TabsTrigger
+            value="quick-replies"
+            className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
+          >
+            <MessageSquare className="size-4" />
+            Quick Replies
+          </TabsTrigger>
+          <TabsTrigger
+            value="appointments"
+            className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
+          >
+            <Settings className="size-4" />
+            Appointments
+          </TabsTrigger>
+          <TabsTrigger
             value="appearance"
             className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
           >
@@ -106,6 +128,20 @@ export default function SettingsPage() {
           >
             <Zap className="size-4" />
             Integrations
+          </TabsTrigger>
+          <TabsTrigger
+            value="optouts"
+            className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
+          >
+            <ShieldCheck className="size-4" />
+            Opt-outs
+          </TabsTrigger>
+          <TabsTrigger
+            value="ai-agent"
+            className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
+          >
+            <Bot className="size-4" />
+            AI Agent
           </TabsTrigger>
         </TabsList>
         </div>
@@ -136,12 +172,28 @@ export default function SettingsPage() {
           <TagManager />
         </TabsContent>
 
+        <TabsContent value="quick-replies">
+          <QuickRepliesPanel />
+        </TabsContent>
+
+        <TabsContent value="appointments">
+          <AppointmentsPanel />
+        </TabsContent>
+
         <TabsContent value="appearance">
           <AppearancePanel />
         </TabsContent>
 
         <TabsContent value="integrations">
           <IntegrationsPanel />
+        </TabsContent>
+
+        <TabsContent value="optouts">
+          <OptOutPanel />
+        </TabsContent>
+
+        <TabsContent value="ai-agent">
+          <AiAgentPanel />
         </TabsContent>
       </Tabs>
     </div>

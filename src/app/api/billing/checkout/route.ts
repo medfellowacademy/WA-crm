@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     const db = adminClient()
 
     // Get or create Stripe customer
-    let customerId = org.stripe_customer_id as string | undefined
+    let customerId = org.stripe_customer_id ?? undefined
     if (!customerId) {
       const customer = await stripe().customers.create({
         email: user.email,

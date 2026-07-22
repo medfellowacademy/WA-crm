@@ -14,6 +14,7 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit'
+import { resolveWaCredentials } from '@/lib/whatsapp/credentials'
 
 export async function POST(request: Request) {
   try {
@@ -70,10 +71,11 @@ export async function POST(request: Request) {
       )
     }
 
-    // Fetch conversation and contact
+    // Fetch conversation and contact (include org_id + whatsapp_number_id
+    // so we can route through the right WABA number below).
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
-      .select('*, contact:contacts(*)')
+      .select('*, contact:contacts(*), org_id, whatsapp_number_id')
       .eq('id', conversation_id)
       .eq('user_id', user.id)
       .single()
@@ -102,40 +104,56 @@ export async function POST(request: Request) {
       )
     }
 
-    // Fetch and decrypt WhatsApp config
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('user_id', user.id)
-      .single()
+    // ── Resolve WhatsApp credentials ─────────────────────────────────
+    // Prefer the number the conversation arrived on (whatsapp_number_id),
+    // then the org default, then any active number.
+    // Fall back to legacy whatsapp_config when org_id is missing.
+    let phoneNumberId: string
+    let accessToken: string
 
-    if (configError || !config) {
-      return NextResponse.json(
-        { error: 'WhatsApp not configured. Please set up your WhatsApp integration first.' },
-        { status: 400 }
-      )
-    }
-
-    const accessToken = decrypt(config.access_token)
-
-    // Self-heal legacy CBC-encrypted tokens. Fire-and-forget: we
-    // return from the send without waiting, so a failed upgrade just
-    // means the next send tries again. The upgrade is idempotent —
-    // concurrent sends both produce valid GCM ciphertexts of the same
-    // plaintext, last write wins.
-    if (isLegacyFormat(config.access_token)) {
-      void supabase
+    if (conversation.org_id) {
+      try {
+        const creds = await resolveWaCredentials(
+          supabaseAdmin(),
+          conversation.org_id,
+          conversation.whatsapp_number_id,
+        )
+        phoneNumberId = creds.phoneNumberId
+        accessToken   = creds.accessToken
+      } catch (err) {
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : 'WhatsApp not configured' },
+          { status: 400 },
+        )
+      }
+    } else {
+      // Legacy single-number account (no org yet)
+      const { data: config, error: configError } = await supabase
         .from('whatsapp_config')
-        .update({ access_token: encrypt(accessToken) })
-        .eq('id', config.id)
-        .then(({ error }) => {
-          if (error) {
-            console.warn(
-              '[whatsapp/send] access_token GCM upgrade failed:',
-              error.message,
-            )
-          }
-        })
+        .select('*')
+        .eq('user_id', user.id)
+        .single()
+
+      if (configError || !config) {
+        return NextResponse.json(
+          { error: 'WhatsApp not configured. Please set up your WhatsApp integration first.' },
+          { status: 400 }
+        )
+      }
+
+      phoneNumberId = config.phone_number_id
+      accessToken   = decrypt(config.access_token)
+
+      // Self-heal legacy CBC-encrypted tokens
+      if (isLegacyFormat(config.access_token)) {
+        void supabase
+          .from('whatsapp_config')
+          .update({ access_token: encrypt(accessToken) })
+          .eq('id', config.id)
+          .then(({ error }) => {
+            if (error) console.warn('[whatsapp/send] access_token GCM upgrade failed:', error.message)
+          })
+      }
     }
 
     // Resolve the reply target (if any) to its Meta message_id, which is
@@ -180,7 +198,7 @@ export async function POST(request: Request) {
     const attempt = async (phone: string): Promise<string> => {
       if (message_type === 'template') {
         const result = await sendTemplateMessage({
-          phoneNumberId: config.phone_number_id,
+          phoneNumberId,
           accessToken,
           to: phone,
           templateName: template_name,
@@ -190,7 +208,7 @@ export async function POST(request: Request) {
         return result.messageId
       }
       const result = await sendTextMessage({
-        phoneNumberId: config.phone_number_id,
+        phoneNumberId,
         accessToken,
         to: phone,
         text: content_text,

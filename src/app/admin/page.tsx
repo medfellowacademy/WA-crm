@@ -133,7 +133,7 @@ export default function AdminPage() {
               placeholder="Search organizations…"
               className="pl-9 border-slate-700 bg-slate-900 text-white placeholder:text-slate-500" />
           </div>
-          <Select value={planFilter} onValueChange={v => { setPlanFilter(v); setPage(1) }}>
+          <Select value={planFilter} onValueChange={v => { setPlanFilter(v ?? 'all'); setPage(1) }}>
             <SelectTrigger className="w-40 border-slate-700 bg-slate-900 text-slate-300">
               <SelectValue placeholder="All plans" />
             </SelectTrigger>

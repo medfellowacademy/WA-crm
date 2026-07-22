@@ -3,7 +3,8 @@ import { stripe } from '@/lib/billing/stripe'
 import { adminClient } from '@/lib/org'
 import type Stripe from 'stripe'
 
-export const config = { api: { bodyParser: false } }
+// App Router reads the raw body via request.text() (needed for Stripe
+// signature verification), so no bodyParser config is required here.
 
 async function updateOrgSubscription(sub: Stripe.Subscription, planOverride?: string) {
   const orgId = sub.metadata?.org_id
@@ -12,12 +13,18 @@ async function updateOrgSubscription(sub: Stripe.Subscription, planOverride?: st
   const plan = planOverride ?? sub.metadata?.plan ?? 'free'
   const db = adminClient()
 
+  // In the 2026-06-24 (dahlia) API the billing period moved off the
+  // Subscription onto each SubscriptionItem, so read it from the first item.
+  const period = sub.items?.data?.[0]
+  const periodStart = period?.current_period_start ?? 0
+  const periodEnd   = period?.current_period_end   ?? 0
+
   await db.from('organizations').update({
     stripe_subscription_id: sub.id,
     subscription_status:    sub.status,
     plan,
-    plan_period_start: new Date((sub.current_period_start ?? 0) * 1000).toISOString(),
-    plan_period_end:   new Date((sub.current_period_end   ?? 0) * 1000).toISOString(),
+    plan_period_start: new Date(periodStart * 1000).toISOString(),
+    plan_period_end:   new Date(periodEnd   * 1000).toISOString(),
   }).eq('id', orgId)
 }
 
@@ -57,8 +64,11 @@ export async function POST(request: Request) {
       }
       case 'invoice.payment_failed': {
         const invoice = event.data.object as Stripe.Invoice
-        if (invoice.subscription) {
-          const sub = await stripe().subscriptions.retrieve(invoice.subscription as string)
+        // dahlia API: the subscription link moved under parent.subscription_details.
+        const subRef = invoice.parent?.subscription_details?.subscription
+        const subId = typeof subRef === 'string' ? subRef : subRef?.id
+        if (subId) {
+          const sub = await stripe().subscriptions.retrieve(subId)
           const orgId = sub.metadata?.org_id
           if (orgId) {
             await adminClient().from('organizations')

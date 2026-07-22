@@ -11,6 +11,8 @@ import {
   ArrowRight, Copy, Loader2, Zap,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { EmbeddedSignupButton } from '@/components/settings/embedded-signup-button'
+import { StarterPackPicker } from '@/components/onboarding/starter-pack-picker'
 
 const STEPS = [
   { id: 'org',       label: 'Your workspace', icon: Building2 },
@@ -185,6 +187,10 @@ export default function OnboardingPage() {
                   className="border-slate-700 bg-slate-800 text-white placeholder:text-slate-500"
                 />
               </div>
+              <div className="space-y-2">
+                <Label className="text-slate-300">Pick your industry <span className="text-slate-500">(optional — preloads templates & pipeline)</span></Label>
+                <StarterPackPicker />
+              </div>
               <Button type="submit" disabled={savingOrg || !orgName.trim()} className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
                 {savingOrg ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 Continue <ArrowRight className="h-4 w-4 ml-2" />
@@ -199,11 +205,25 @@ export default function OnboardingPage() {
             <div className="space-y-1">
               <h1 className="text-2xl font-bold text-white">Connect WhatsApp</h1>
               <p className="text-slate-400 text-sm">
-                Enter your Meta Cloud API credentials. You can find these in the{' '}
-                <a href="https://developers.facebook.com/apps" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                  Meta Developer Portal
-                </a>.
+                The fastest way is to sign in with Facebook — we&apos;ll set everything up for you.
               </p>
+            </div>
+
+            {/* One-click connect (Embedded Signup) */}
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
+              <EmbeddedSignupButton
+                onConnected={() => setStep('team')}
+                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+              />
+              <p className="text-center text-xs text-slate-500">
+                No IDs or tokens to copy — recommended
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-slate-800" />
+              <span className="text-xs text-slate-500">or enter credentials manually</span>
+              <div className="h-px flex-1 bg-slate-800" />
             </div>
 
             {/* Webhook URL copy */}
